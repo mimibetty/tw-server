@@ -1,0 +1,7 @@
+.venv/
+.ruff_cache/
+
+*.pyc
+.DS_Store
+.env*
+!.env*.example

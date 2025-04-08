@@ -1,0 +1,12 @@
+**/.DS_Store
+**/__pycache__
+**/.venv
+**/.dockerignore
+**/.env
+**/.git
+**/.gitignore
+**/.vscode
+**/docker-compose*
+**/compose.y*ml
+**/Dockerfile*
+README.md

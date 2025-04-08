@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+                font-family: Arial, sans-serif;
+            }
+            p {
+                font-size: 1rem;
+                line-height: 1.5;
+            }
+        </style>
+    </head>
+    <body>
+        <div style="margin: 0 auto; max-width: 35rem; padding: 1rem 2rem">
+            <h1 style="font-size: 1.25rem; line-height: 1.5">Hi {{ name }},</h1>
+            <div style="margin: 1.5rem 0">
+                <p>Here is your One Time Password (OTP).</p>
+                <p>
+                    Please enter this code to verify your email address for
+                    TripWise.
+                </p>
+                <div
+                    style="
+                        width: 100%;
+                        display: flex;
+                        margin: 1rem 0;
+                        justify-content: center;
+                    "
+                >
+                    <span
+                        style="
+                            color: #fff;
+                            font-weight: 600;
+                            font-size: 1.5rem;
+                            text-align: center;
+                            border-radius: 1rem;
+                            padding: 1rem 1.5rem;
+                            letter-spacing: 0.25rem;
+                            border: 1px solid #ccc;
+                            background-color: #605dff;
+                        "
+                        >{{ otp_code }}</span
+                    >
+                </div>
+                <p>This code will expire in <b>5 minutes</b>.</p>
+            </div>
+            <p>Best regards,</p>
+            <p style="color: #605dff">TripWise Team</p>
+            <div
+                style="
+                    width: 100%;
+                    height: 1px;
+                    margin: 1.5rem 0;
+                    background-color: #ccc;
+                "
+            ></div>
+            <p style="text-align: center; font-size: 0.75rem">
+                Copyright © 2025 by TripWise - All right reserved
+            </p>
+        </div>
+    </body>
+</html>
