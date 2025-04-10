@@ -23,7 +23,7 @@ from app.utils.cache import Cache
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 
-@bp.route('/sign-in', methods=['POST'])
+@bp.post('/sign-in')
 def sign_in():
     data = LoginSchema().load(request.get_json())
     user = UserModel.query.filter(UserModel.email == data['email']).first()
@@ -42,7 +42,7 @@ def sign_in():
     )
 
 
-@bp.route('/refresh', methods=['POST'])
+@bp.post('/refresh')
 @jwt_required(refresh=True)
 def refresh():
     identity = get_jwt_identity()
@@ -53,7 +53,7 @@ def refresh():
     )
 
 
-@bp.route('/sign-up', methods=['POST'])
+@bp.post('/sign-up')
 def sign_up():
     data = RegisterSchema().load(request.get_json())
     user = UserModel(**data)
@@ -61,7 +61,7 @@ def sign_up():
     return create_response(message='Signed up successfully.', status=200)
 
 
-@bp.route('/send-otp', methods=['POST'])
+@bp.post('/send-otp')
 def send_otp():
     data = SendEmailOTPSchema().load(request.get_json())
     user = UserModel.query.filter(UserModel.email == data['email']).first()
@@ -88,7 +88,7 @@ def send_otp():
     return create_response(message='OTP code sent successfully.')
 
 
-@bp.route('/verify-email', methods=['POST'])
+@bp.post('/verify-email')
 def verify_email():
     data = VerifyEmailSchema().load(request.get_json())
     cached_data = Cache.get(f'otp_{data["email"]}')
@@ -111,7 +111,7 @@ def verify_email():
     return create_response(message='Email verified successfully.')
 
 
-@bp.route('/me', methods=['GET'])
+@bp.get('/me')
 @jwt_required()
 def me():
     # Check cache

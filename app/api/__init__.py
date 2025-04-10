@@ -18,6 +18,12 @@ bp.register_blueprint(auth_bp)
 bp.register_blueprint(users_bp)
 
 
+@bp.get('/health')
+def health_check():
+    """Health check endpoint."""
+    return create_response(message='OK', status=200)
+
+
 def unauthorized_handler(e):
     return create_response(message='Unauthorized', status=401)
 

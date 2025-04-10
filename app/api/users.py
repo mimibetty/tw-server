@@ -7,7 +7,7 @@ from app.utils import create_response
 bp = Blueprint('users', __name__, url_prefix='/users')
 
 
-@bp.route('/', methods=['GET'])
+@bp.get('/')
 def get_users():
     # Pagination parameters
     page = request.args.get('page', 1, type=int)
@@ -46,14 +46,14 @@ def get_users():
     )
 
 
-@bp.route('/', methods=['POST'])
+@bp.post('/')
 def create_user():
     user: UserModel = UserSchema().load(request.get_json())
     user.add()
     return create_response(data=UserSchema().dump(user), status=201)
 
 
-@bp.route('/<user_id>', methods=['GET'])
+@bp.get('/<user_id>')
 def retrieve_user(user_id: str):
     user = UserModel.query.get_or_404(user_id)
     return create_response(
@@ -62,7 +62,7 @@ def retrieve_user(user_id: str):
     )
 
 
-@bp.route('/<user_id>', methods=['PUT'])
+@bp.put('/<user_id>')
 def update_user(user_id: str):
     user = UserModel.query.get_or_404(user_id)
     updated_user: UserModel = UserSchema().load(
@@ -75,7 +75,7 @@ def update_user(user_id: str):
     )
 
 
-@bp.route('/<user_id>', methods=['DELETE'])
+@bp.delete('/<user_id>')
 def delete_user(user_id: str):
     user: UserModel = UserModel.query.get_or_404(user_id)
     user.delete()

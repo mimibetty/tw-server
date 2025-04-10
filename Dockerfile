@@ -29,6 +29,7 @@ ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
 COPY --chown=$USER_UID:$USER_GID requirements.txt .
 RUN python -m pip install --user --upgrade pip
 RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --user --no-cache-dir gunicorn
 
 # Copy the rest of the application
 COPY --chown=$USER_UID:$USER_GID . .
