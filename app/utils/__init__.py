@@ -7,7 +7,7 @@ from google import genai
 from app.environments import GEMINI_API_KEY
 
 
-def create_response(data=None, message: str = None, status: int = 200):
+def create_response(data=None, message: str = 'Success', status: int = 200):
     body = json.dumps(
         {'data': data, 'message': message, 'status': status}, sort_keys=True
     )

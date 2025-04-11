@@ -70,6 +70,10 @@ class BaseModel(db.Model):
             db.session.rollback()
             raise e
 
+    def get_id(self):
+        """Get the ID of the record."""
+        return str(self.id)
+
     def __repr__(self):
         return f'<{self.__class__.__name__} {self.id}>'
 
@@ -86,16 +90,23 @@ class UserModel(BaseModel):
     password = Column(String(255), nullable=False)
 
     def __init__(
-        self, email: str, password: str, name: str, is_admin: bool = False
+        self,
+        email: str,
+        password: str,
+        name: str,
+        avatar: str = None,
+        is_admin: bool = False,
+        is_verified: bool = False,
     ):
         super().__init__()
+        self.avatar = avatar
         self.email = email
-        self.password = generate_password_hash(password)
-        self.name = name
         self.is_admin = is_admin
+        self.is_verified = is_verified
+        self.name = name
+        self.password = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
-        """Check if the provided password matches the stored password."""
         return check_password_hash(self.password, password)
 
 
@@ -125,14 +136,14 @@ class UserReviewModel(BaseModel):
         rating: int,
         text: str,
         user_id: str,
-        images: list[str] = None,
+        images: list[str] = [],
     ):
         super().__init__()
+        self.images = images
         self.place_id = place_id
-        self.text = text
         self.rating = rating
+        self.text = text
         self.user_id = user_id
-        self.images = images if images else []
 
 
 class ReviewReactionModel(BaseModel):
@@ -140,13 +151,16 @@ class ReviewReactionModel(BaseModel):
 
     # Fields
     review_id = Column(
-        UUID(as_uuid=True), ForeignKey('reviews.id'), index=True, nullable=False
+        UUID(as_uuid=True),
+        ForeignKey('user_reviews.id'),
+        index=True,
+        nullable=False,
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     # Constraint to ensure that a user can only react to a review once
-    __table_args__ = UniqueConstraint(
-        'review_id', 'user_id', name='unique_review_user'
+    __table_args__ = (
+        UniqueConstraint('review_id', 'user_id', name='unique_review_user'),
     )
 
     def __init__(self, review_id: str, user_id: str):
@@ -163,8 +177,8 @@ class UserFavoriteModel(BaseModel):
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     # Constraint to ensure that a user can only save a place once
-    __table_args__ = UniqueConstraint(
-        'place_id', 'user_id', name='unique_place_user'
+    __table_args__ = (
+        UniqueConstraint('place_id', 'user_id', name='unique_place_user'),
     )
 
     def __init__(self, place_id: str, user_id: str):

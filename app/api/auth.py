@@ -1,4 +1,5 @@
-import random
+import re
+from random import randint
 
 from flask import Blueprint, abort, render_template, request
 from flask_jwt_extended import (
@@ -9,14 +10,8 @@ from flask_jwt_extended import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app.constants import EMAIL_REGEX, OTP_CODE_REGEX, PASSWORD_REGEX
 from app.database.postgres import UserModel
-from app.schemas.auth import (
-    LoginSchema,
-    MeSchema,
-    RegisterSchema,
-    SendEmailOTPSchema,
-    VerifyEmailSchema,
-)
 from app.utils import create_response, send_async_email
 from app.utils.cache import Cache
 
@@ -25,20 +20,25 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 @bp.post('/sign-in')
 def sign_in():
-    data = LoginSchema().load(request.get_json())
-    user = UserModel.query.filter(UserModel.email == data['email']).first()
-    if type(user) is not UserModel or not user.check_password(data['password']):
+    # Input validation
+    email = request.json.get('email')
+    password = request.json.get('password')
+
+    if not all([email, password]):
+        abort(400, 'Missing required fields.')
+    if not re.match(EMAIL_REGEX, email) or re.match(PASSWORD_REGEX, password):
+        abort(400, 'Invalid input format.')
+
+    # Get user from database
+    user = UserModel.query.filter(UserModel.email == email).first()
+    if type(user) is not UserModel or not user.check_password(password):
         abort(400, 'Invalid email or password.')
 
     # Create JWT tokens
-    access_token = create_access_token(identity=str(user.id))
-    refresh_token = create_refresh_token(identity=str(user.id))
+    access_token = create_access_token(identity=user.get_id())
+    refresh_token = create_refresh_token(identity=user.get_id())
     return create_response(
-        message='Signed in successfully.',
-        data={
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-        },
+        data={'accessToken': access_token, 'refreshToken': refresh_token}
     )
 
 
@@ -47,35 +47,52 @@ def sign_in():
 def refresh():
     identity = get_jwt_identity()
     access_token = create_access_token(identity=identity)
-    return create_response(
-        message='Token refreshed successfully.',
-        data={'access_token': access_token},
-    )
+    return create_response(data={'accessToken': access_token})
 
 
 @bp.post('/sign-up')
 def sign_up():
-    data = RegisterSchema().load(request.get_json())
-    user = UserModel(**data)
+    # Input validation
+    name = request.json.get('name')
+    email = request.json.get('email')
+    password = request.json.get('password')
+
+    if not all([name, email, password]):
+        abort(400, 'Missing required fields.')
+    if not re.match(EMAIL_REGEX, email) or re.match(PASSWORD_REGEX, password):
+        abort(400, 'Invalid input format.')
+
+    # Check if user already exists
+    existing_user = UserModel.query.filter(UserModel.email == email).first()
+    if type(existing_user) is UserModel:
+        abort(400, 'Email already exists.')
+
+    # Query database
+    user = UserModel(email, password, name)
     user.add()
-    return create_response(message='Signed up successfully.', status=200)
+    return create_response()
 
 
 @bp.post('/send-otp')
 def send_otp():
-    data = SendEmailOTPSchema().load(request.get_json())
-    user = UserModel.query.filter(UserModel.email == data['email']).first()
-    if type(user) is not UserModel:
-        abort(404, 'User not found.')
+    # Input validation
+    email = request.json.get('email')
+    if not email:
+        abort(400, 'Missing required fields.')
+    if not re.match(EMAIL_REGEX, email):
+        abort(400, 'Invalid email format.')
+
+    # Check if user exists
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
     if user.is_verified:
         abort(400, 'User already verified.')
 
     # Generate OTP code
-    otp_code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+    otp_code = ''.join([str(randint(0, 9)) for _ in range(6)])
     Cache.set(
-        f'otp_{data["email"]}',
-        generate_password_hash(otp_code),
-        expire_in_minutes=5,
+        f'otp_{email}', generate_password_hash(otp_code), expire_in_minutes=5
     )
 
     # Send OTP code to user's email
@@ -85,29 +102,38 @@ def send_otp():
     send_async_email(
         subject='Email Verification', recipients=[user.email], html=mail_html
     )
-    return create_response(message='OTP code sent successfully.')
+    return create_response(message='One-time password sent successfully.')
 
 
 @bp.post('/verify-email')
 def verify_email():
-    data = VerifyEmailSchema().load(request.get_json())
-    cached_data = Cache.get(f'otp_{data["email"]}')
-    if not cached_data or not check_password_hash(
-        cached_data, data['otp_code']
-    ):
-        abort(400, 'Invalid OTP code.')
+    # Input validation
+    email = request.json.get('email')
+    otp_code = request.json.get('otp_code')
 
-    # Get user from database
-    user = UserModel.query.filter(UserModel.email == data['email']).first()
-    if type(user) is not UserModel:
-        abort(404, 'User not found.')
+    if not all([email, otp_code]):
+        abort(400, 'Missing required fields.')
+    if not re.match(EMAIL_REGEX, email) or not re.match(
+        OTP_CODE_REGEX, otp_code
+    ):
+        abort(400, 'Invalid input format.')
+
+    cached_data = Cache.get(f'otp_{email}')
+    if not cached_data or not check_password_hash(cached_data, otp_code):
+        abort(400, 'One-time password is invalid or expired.')
+
+    # Update user verification status
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
     if user.is_verified:
         abort(400, 'User already verified.')
+
     user.is_verified = True
     user.update()
 
-    # Delete OTP cache
-    Cache.delete(f'otp_{data["email"]}')
+    # Delete cache
+    Cache.delete(f'otp_{email}')
     return create_response(message='Email verified successfully.')
 
 
@@ -116,16 +142,23 @@ def verify_email():
 def me():
     # Check cache
     identity = get_jwt_identity()
-    cached_data = Cache.get(f'me_{identity}')
-    if cached_data:
-        return create_response(message='User found.', data=cached_data)
+    try:
+        cached_data = Cache.get(f'me_{identity}')
+        if cached_data:
+            return create_response(data=cached_data)
+    except Exception:
+        pass
 
     # Get user from database
-    user = UserModel.query.filter(UserModel.id == identity).first()
-    if type(user) is not UserModel:
-        abort(404, 'User not found.')
+    user: UserModel = UserModel.query.filter(
+        UserModel.id == identity
+    ).first_or_404()
 
     # Response and cache
-    response = MeSchema().dump(user)
-    Cache.set(f'me_{identity}', response)
-    return create_response(message='User found.', data=response)
+    data = {'id': user.id, 'avatar': user.avatar, 'name': user.name}
+    try:
+        Cache.set(f'me_{identity}', data)
+    except Exception:
+        pass
+
+    return create_response(data=data)

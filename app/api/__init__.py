@@ -3,8 +3,12 @@ import logging
 from flask import Blueprint
 from flask_jwt_extended.exceptions import NoAuthorizationError
 from jwt.exceptions import ExpiredSignatureError
-from marshmallow import ValidationError
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import (
+    BadRequest,
+    HTTPException,
+    InternalServerError,
+    Unauthorized,
+)
 
 from app.utils import create_response
 
@@ -20,29 +24,24 @@ bp.register_blueprint(users_bp)
 
 @bp.get('/health')
 def health_check():
-    """Health check endpoint."""
     return create_response(message='OK', status=200)
 
 
-def unauthorized_handler(e):
-    return create_response(message='Unauthorized', status=401)
+# JWT Exceptions
+def unauthorized_handler(_):
+    return create_response(message=Unauthorized.name, status=Unauthorized.code)
 
 
-def validation_handler(e: ValidationError):
-    return create_response(data=e.messages, status=400)
-
-
-def http_handler(e: HTTPException):
-    return create_response(message=e.description, status=e.code)
-
-
-def unknown_handler(e: Exception):
-    logger.exception('Unknown error occurred:', exc_info=e)
-    return create_response(message='Internal Server Error', status=500)
-
-
-bp.register_error_handler(ValidationError, validation_handler)
 bp.register_error_handler(NoAuthorizationError, unauthorized_handler)
 bp.register_error_handler(ExpiredSignatureError, unauthorized_handler)
-bp.register_error_handler(HTTPException, http_handler)
-bp.register_error_handler(Exception, unknown_handler)
+
+
+# HTTP Exceptions
+@bp.errorhandler(HTTPException)
+def http_handler(e: HTTPException):
+    if e.code == BadRequest.code:
+        return create_response(message=e.description, status=BadRequest.code)
+    elif e.code == InternalServerError.code:
+        logger.exception(e)
+
+    return create_response(message=e.name, status=e.code)

@@ -15,8 +15,8 @@ NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD')
 
 # Redis
 REDIS_HOST = os.getenv('REDIS_HOST') or 'localhost'
-REDIS_PORT = int(os.getenv('REDIS_PORT')) or 6379
-REDIS_DB = int(os.getenv('REDIS_DB')) or 0
+REDIS_PORT = int(os.getenv('REDIS_PORT') or 6379)
+REDIS_DB = 0
 REDIS_USERNAME = os.getenv('REDIS_USERNAME')
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 
@@ -37,10 +37,10 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
 
     # Mail
-    MAIL_SERVER = os.getenv('MAIL_SERVER') or 'smtp.gmail.com'
-    MAIL_PORT = int(os.getenv('MAIL_PORT')) or 587
-    MAIL_USE_TLS = bool(os.getenv('MAIL_USE_TLS'))
-    MAIL_USE_SSL = bool(os.getenv('MAIL_USE_SSL')) or False
+    MAIL_SERVER = 'smtp.gmail.com'
+    MAIL_PORT = 587
+    MAIL_USE_TLS = True
+    MAIL_USE_SSL = False
     MAIL_USERNAME = os.getenv('MAIL_USERNAME')
     MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
 
