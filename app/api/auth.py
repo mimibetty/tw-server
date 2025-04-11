@@ -10,8 +10,12 @@ from flask_jwt_extended import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.constants import EMAIL_REGEX, OTP_CODE_REGEX, PASSWORD_REGEX
-from app.database.postgres import UserModel
+from app.constants import (
+    EMAIL_REGEX,
+    OTP_CODE_REGEX,
+    PASSWORD_REGEX,
+)
+from app.db.postgres import UserModel
 from app.utils import create_response, send_async_email
 from app.utils.cache import Cache
 
@@ -23,11 +27,12 @@ def sign_in():
     # Input validation
     email = request.json.get('email')
     password = request.json.get('password')
-
-    if not all([email, password]):
-        abort(400, 'Missing required fields.')
-    if not re.match(EMAIL_REGEX, email) or re.match(PASSWORD_REGEX, password):
-        abort(400, 'Invalid input format.')
+    if not (
+        all([email, password])
+        and re.match(EMAIL_REGEX, email)
+        and re.match(PASSWORD_REGEX, password)
+    ):
+        abort(400)
 
     # Get user from database
     user = UserModel.query.filter(UserModel.email == email).first()
@@ -56,11 +61,12 @@ def sign_up():
     name = request.json.get('name')
     email = request.json.get('email')
     password = request.json.get('password')
-
-    if not all([name, email, password]):
-        abort(400, 'Missing required fields.')
-    if not re.match(EMAIL_REGEX, email) or re.match(PASSWORD_REGEX, password):
-        abort(400, 'Invalid input format.')
+    if not (
+        all([name, email, password])
+        and re.match(EMAIL_REGEX, email)
+        and re.match(PASSWORD_REGEX, password)
+    ):
+        abort(400)
 
     # Check if user already exists
     existing_user = UserModel.query.filter(UserModel.email == email).first()
@@ -77,10 +83,13 @@ def sign_up():
 def send_otp():
     # Input validation
     email = request.json.get('email')
-    if not email:
-        abort(400, 'Missing required fields.')
-    if not re.match(EMAIL_REGEX, email):
-        abort(400, 'Invalid email format.')
+    reset = request.json.get('reset')
+    if not (
+        all([email, reset])
+        and re.match(EMAIL_REGEX, email)
+        and type(reset) is bool
+    ):
+        abort(400)
 
     # Check if user exists
     user: UserModel = UserModel.query.filter(
@@ -91,17 +100,28 @@ def send_otp():
 
     # Generate OTP code
     otp_code = ''.join([str(randint(0, 9)) for _ in range(6)])
+    Cache.delete(f'otp_{email}')
     Cache.set(
         f'otp_{email}', generate_password_hash(otp_code), expire_in_minutes=5
     )
 
-    # Send OTP code to user's email
-    mail_html = render_template(
-        'email_otp.html', name=user.name, otp_code=otp_code
-    )
-    send_async_email(
-        subject='Email Verification', recipients=[user.email], html=mail_html
-    )
+    # Send OTP code via email
+    if reset:
+        mail_html = render_template(
+            'email_reset_password.html', name=user.name, otp_code=otp_code
+        )
+        send_async_email(
+            subject='Reset Password', recipients=[user.email], html=mail_html
+        )
+    else:
+        mail_html = render_template(
+            'email_otp.html', name=user.name, otp_code=otp_code
+        )
+        send_async_email(
+            subject='Email Verification',
+            recipients=[user.email],
+            html=mail_html,
+        )
     return create_response(message='One-time password sent successfully.')
 
 
@@ -110,13 +130,12 @@ def verify_email():
     # Input validation
     email = request.json.get('email')
     otp_code = request.json.get('otp_code')
-
-    if not all([email, otp_code]):
-        abort(400, 'Missing required fields.')
-    if not re.match(EMAIL_REGEX, email) or not re.match(
-        OTP_CODE_REGEX, otp_code
+    if not (
+        all([email, otp_code])
+        and re.match(EMAIL_REGEX, email)
+        and re.match(OTP_CODE_REGEX, otp_code)
     ):
-        abort(400, 'Invalid input format.')
+        abort(400)
 
     cached_data = Cache.get(f'otp_{email}')
     if not cached_data or not check_password_hash(cached_data, otp_code):
@@ -162,3 +181,34 @@ def me():
         pass
 
     return create_response(data=data)
+
+
+@bp.post('/forgot-password')
+def forgot_password():
+    # Input validation
+    email = request.json.get('email')
+    otp_code = request.json.get('otp_code')
+    new_password = request.json.get('new_password')
+    if not (
+        all([email, otp_code, new_password])
+        and re.match(EMAIL_REGEX, email)
+        and re.match(OTP_CODE_REGEX, otp_code)
+        and re.match(PASSWORD_REGEX, new_password)
+    ):
+        abort(400)
+
+    # Check cache
+    cached_data = Cache.get(f'otp_{email}')
+    if not cached_data or not check_password_hash(cached_data, otp_code):
+        abort(400, 'One-time password is invalid or expired.')
+
+    # Update user password
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
+    user.password = generate_password_hash(new_password)
+    user.update()
+
+    # Delete cache
+    Cache.delete(f'otp_{email}')
+    return create_response(message='Password reset successfully.')
