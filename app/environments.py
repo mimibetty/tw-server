@@ -48,7 +48,7 @@ class Config:
 class DevelopmentConfig(Config):
     DEBUG = True
     TESTING = False
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=5)
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=1)
 
 
 class TestingConfig(Config):

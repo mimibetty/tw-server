@@ -12,6 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.constants import (
     EMAIL_REGEX,
+    INVALID_INPUT,
     OTP_CODE_REGEX,
     PASSWORD_REGEX,
 )
@@ -32,7 +33,7 @@ def sign_in():
         and re.match(EMAIL_REGEX, email)
         and re.match(PASSWORD_REGEX, password)
     ):
-        abort(400)
+        abort(400, INVALID_INPUT)
 
     # Get user from database
     user = UserModel.query.filter(UserModel.email == email).first()

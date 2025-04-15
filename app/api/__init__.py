@@ -1,8 +1,7 @@
 import logging
 
 from flask import Blueprint
-from flask_jwt_extended.exceptions import NoAuthorizationError
-from jwt.exceptions import ExpiredSignatureError
+from jwt.exceptions import PyJWTError
 from werkzeug.exceptions import (
     BadRequest,
     HTTPException,
@@ -24,16 +23,15 @@ bp.register_blueprint(users_bp)
 
 @bp.get('/health')
 def health_check():
-    return create_response(message='OK', status=200)
+    return create_response(message='OK')
 
 
-# JWT Exceptions
-def unauthorized_handler(_):
-    return create_response(message=Unauthorized.name, status=Unauthorized.code)
-
-
-bp.register_error_handler(NoAuthorizationError, unauthorized_handler)
-bp.register_error_handler(ExpiredSignatureError, unauthorized_handler)
+# PyJWT Exceptions
+@bp.errorhandler(PyJWTError)
+def unauthorized_handler(_: PyJWTError):
+    return create_response(
+        message=Unauthorized.name, status=Unauthorized.code, default=False
+    )
 
 
 # HTTP Exceptions

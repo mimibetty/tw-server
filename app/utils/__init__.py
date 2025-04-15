@@ -4,14 +4,25 @@ from flask import Response
 from flask_mail import Message
 from google import genai
 
+from app.constants import SUCCESS_MESSAGE
 from app.environments import GEMINI_API_KEY
 
 
-def create_response(data=None, message: str = 'Success', status: int = 200):
+def create_response(
+    data=None,
+    message: str = SUCCESS_MESSAGE,
+    status: int = 200,
+    default: bool = True,
+):
     body = json.dumps(
         {'data': data, 'message': message, 'status': status}, sort_keys=True
     )
-    return Response(response=body, status=status, mimetype='application/json')
+    if default:
+        return Response(response=body, status=200, mimetype='application/json')
+    else:
+        return Response(
+            response=body, status=status, mimetype='application/json'
+        )
 
 
 def request_gemini(contents: str, model: str = 'gemini-2.0-flash'):
