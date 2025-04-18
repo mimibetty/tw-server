@@ -4,8 +4,8 @@ from flask import Response
 from flask_mail import Message
 from google import genai
 
-from app.constants import SUCCESS_MESSAGE
-from app.environments import GEMINI_API_KEY
+from ..constants import SUCCESS_MESSAGE
+from ..environments import GEMINI_API_KEY
 
 
 def create_response(

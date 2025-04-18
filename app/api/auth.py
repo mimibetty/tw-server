@@ -10,15 +10,15 @@ from flask_jwt_extended import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.constants import (
+from ..constants import (
     EMAIL_REGEX,
     INVALID_INPUT,
     OTP_CODE_REGEX,
     PASSWORD_REGEX,
 )
-from app.postgres import UserModel
-from app.utils import create_response, send_async_email
-from app.utils.cache import Cache
+from ..postgres import UserModel
+from ..utils import create_response, send_async_email
+from ..utils.cache import Cache
 
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 
