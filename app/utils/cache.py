@@ -1,9 +1,8 @@
-import json
-
-
 class Cache:
     @staticmethod
     def set(key: str, data: dict, expire_in_minutes: int = 60):
+        import json
+
         from app import AppContext
 
         try:
@@ -15,6 +14,8 @@ class Cache:
 
     @staticmethod
     def get(key: str) -> dict:
+        import json
+
         from app import AppContext
 
         try:
