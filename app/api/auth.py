@@ -16,7 +16,7 @@ from app.constants import (
     OTP_CODE_REGEX,
     PASSWORD_REGEX,
 )
-from app.db.postgres import UserModel
+from app.postgres import UserModel
 from app.utils import create_response, send_async_email
 from app.utils.cache import Cache
 
@@ -165,7 +165,7 @@ def me():
     try:
         cached_data = Cache.get(f'me_{identity}')
         if cached_data:
-            return create_response(data=cached_data)
+            return create_response(dat=cached_data)
     except Exception:
         pass
 

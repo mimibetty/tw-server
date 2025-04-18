@@ -1,6 +1,7 @@
 import uuid
 
 from flask_sqlalchemy import SQLAlchemy
+from neo4j import GraphDatabase
 from sqlalchemy import (
     ARRAY,
     UUID,
@@ -16,6 +17,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import check_password_hash, generate_password_hash
+
+
+def get_neo4j():
+    from app.environments import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USERNAME
+
+    return GraphDatabase.driver(
+        uri=NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
+    )
 
 
 class Base(DeclarativeBase):
@@ -118,7 +127,9 @@ class UserReviewModel(BaseModel):
     place_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     rating = Column(Integer, nullable=False)
     text = Column(String(255), nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
+    )
 
     # Constraints to ensure a user can review a place only once and rating is between 1 to 5
     __table_args__ = (
@@ -156,7 +167,9 @@ class ReviewReactionModel(BaseModel):
         index=True,
         nullable=False,
     )
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
+    )
 
     # Constraint to ensure that a user can only react to a review once
     __table_args__ = (
@@ -174,7 +187,9 @@ class UserFavoriteModel(BaseModel):
 
     # Fields
     place_id = Column(UUID(as_uuid=True), index=True, nullable=False)
-    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
+    )
 
     # Constraint to ensure that a user can only save a place once
     __table_args__ = (

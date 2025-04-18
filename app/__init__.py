@@ -5,7 +5,6 @@ from flask import Flask
 
 from .api import bp
 from .constants import TEMPLATES_DIR
-from .db.postgres import db
 from .environments import (
     REDIS_DB,
     REDIS_HOST,
@@ -15,6 +14,7 @@ from .environments import (
     Config,
 )
 from .extensions import cors, jwt, mail, migrate
+from .postgres import db
 
 
 class AppContext:
