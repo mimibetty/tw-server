@@ -40,3 +40,11 @@ flask db upgrade
 ```bash
 python wsgi.py
 ```
+
+### Make new migrations
+
+```bash
+export FLASK_APP='wsgi.py'
+flask db migrate -m "<MIGRATION_MESSAGE>"
+flask db upgrade
+```

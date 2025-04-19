@@ -1,7 +1,6 @@
 import uuid
 
 from flask_sqlalchemy import SQLAlchemy
-from neo4j import GraphDatabase
 from sqlalchemy import (
     ARRAY,
     UUID,
@@ -17,14 +16,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.security import check_password_hash, generate_password_hash
-
-
-def get_neo4j():
-    from app.environments import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USERNAME
-
-    return GraphDatabase.driver(
-        uri=NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
-    )
 
 
 class Base(DeclarativeBase):

@@ -1,32 +1,3 @@
-def create_response(
-    data=None,
-    message: str = None,
-    status: int = 200,
-    default: bool = True,
-):
-    """Create a JSON response."""
-    import json
-
-    from flask import Response
-
-    from ..constants import SUCCESS_MESSAGE
-
-    body = json.dumps(
-        {
-            'data': data,
-            'message': message if message else SUCCESS_MESSAGE,
-            'status': status,
-        },
-        sort_keys=True,
-    )
-    if default:
-        return Response(response=body, status=200, mimetype='application/json')
-    else:
-        return Response(
-            response=body, status=status, mimetype='application/json'
-        )
-
-
 def get_neo4j():
     """Create a Neo4j driver instance."""
     from neo4j import GraphDatabase
