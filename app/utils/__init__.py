@@ -42,3 +42,10 @@ def send_async_email(recipients: list[str], subject: str, html: str):
     message.html = html
     thread = Thread(target=send_email, args=(message,))
     thread.start()
+
+
+def generate_otp_code(length: int = 6) -> str:
+    """Generate a random OTP code."""
+    from random import randint
+
+    return ''.join([str(randint(0, 9)) for _ in range(length)])

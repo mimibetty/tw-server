@@ -1,7 +1,7 @@
 import logging
 import re
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, abort, render_template, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -9,16 +9,16 @@ from flask_jwt_extended import (
     jwt_required,
 )
 
-from app.utils.response import APIResponse
-
-from ..constants import (
+from app.constants import (
     EMAIL_REGEX,
     INVALID_INPUT,
     OTP_CODE_REGEX,
     PASSWORD_REGEX,
 )
-from ..postgres import UserModel
-from ..utils.cache import Cache
+from app.postgres import UserModel
+from app.utils import generate_otp_code
+from app.utils.cache import Cache
+from app.utils.response import APIResponse
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -26,27 +26,29 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 @bp.post('/sign-in')
 def sign_in():
-    email = request.json.get('email')
-    password = request.json.get('password')
+    data = request.get_json()
+    email = data['email']
+    password = data['password']
+
     if not (
         all([email, password])
         and re.match(EMAIL_REGEX, email)
         and re.match(PASSWORD_REGEX, password)
     ):
-        return APIResponse.error(error=INVALID_INPUT, status=400)
+        abort(400, INVALID_INPUT)
 
     # Get user from database
-    user = UserModel.query.filter(UserModel.email == email).first()
-    if type(user) is not UserModel or not user.check_password(password):
-        return APIResponse.error(
-            error='Invalid email or password.', status=400
-        )
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
+    if not user.check_password(password):
+        abort(400, 'Invalid email or password')
 
     # Create JWT tokens
     access_token = create_access_token(identity=user.get_id())
     refresh_token = create_refresh_token(identity=user.get_id())
     return APIResponse.success(
-        message='Sign in successfully.',
+        message='Sign in successfully',
         data={'accessToken': access_token, 'refreshToken': refresh_token},
     )
 
@@ -57,61 +59,63 @@ def refresh():
     identity = get_jwt_identity()
     access_token = create_access_token(identity=identity)
     return APIResponse.success(
-        message='Token refreshed successfully.',
+        message='Token refreshed successfully',
         data={'accessToken': access_token},
     )
 
 
 @bp.post('/sign-up')
 def sign_up():
-    name = request.json.get('name')
-    email = request.json.get('email')
-    password = request.json.get('password')
+    data = request.get_json()
+    name = data['name']
+    email = data['email']
+    password = data['password']
+
     if not (
         all([name, email, password])
         and re.match(EMAIL_REGEX, email)
         and re.match(PASSWORD_REGEX, password)
     ):
-        return APIResponse.error(error=INVALID_INPUT, status=400)
+        abort(400, INVALID_INPUT)
 
     # Check if user already exists
     existing_user = UserModel.query.filter(UserModel.email == email).first()
     if type(existing_user) is UserModel:
-        return APIResponse.error(error='Email already exists.', status=400)
+        abort(400, 'Email already exists')
 
     # Query database
     user = UserModel(email, password, name)
     user.add()
-    return APIResponse.success(message='Sign up successfully.')
+    return APIResponse.success(message='Sign up successfully', status=201)
 
 
 @bp.post('/send-otp')
 def send_otp():
-    from random import randint
-
     from werkzeug.security import generate_password_hash
 
-    from ..utils import send_async_email
+    from app.utils import send_async_email
 
-    email = request.json.get('email')
-    reset = request.json.get('reset')
+    data = request.get_json()
+    email = data['email']
+    reset = bool(data['reset'])
+
     if not (
         all([email, reset])
         and re.match(EMAIL_REGEX, email)
         and type(reset) is bool
     ):
-        return APIResponse.error(error=INVALID_INPUT, status=400)
+        abort(400, INVALID_INPUT)
 
     # Check if user exists
-    user = UserModel.query.filter(UserModel.email == email).first()
-    if type(user) is not UserModel:
-        return APIResponse.error(error='User not found.', status=400)
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
 
-    if user.is_verified:
-        return APIResponse.error(error='User already verified.', status=400)
+    if not reset and user.is_verified:
+        abort(400, 'User already verified')
 
     # Generate OTP code
-    otp_code = ''.join([str(randint(0, 9)) for _ in range(6)])
+    otp_code = generate_otp_code()
     Cache.delete(f'otp_{email}')
     Cache.set(
         f'otp_{email}', generate_password_hash(otp_code), expire_in_minutes=5
@@ -135,42 +139,41 @@ def send_otp():
             html=mail_html,
         )
 
-    return APIResponse.success(message='One-time password sent successfully.')
+    return APIResponse.success(message='One-time password sent successfully')
 
 
 @bp.post('/verify-email')
 def verify_email():
     from werkzeug.security import check_password_hash
 
-    email = request.json.get('email')
-    otp_code = request.json.get('otp_code')
+    data = request.get_json()
+    email = data['email']
+    otp_code = data['otp_code']
+
     if not (
         all([email, otp_code])
         and re.match(EMAIL_REGEX, email)
         and re.match(OTP_CODE_REGEX, otp_code)
     ):
-        return APIResponse.error(error=INVALID_INPUT, status=400)
+        abort(400, INVALID_INPUT)
 
     cached_data = Cache.get(f'otp_{email}')
     if not cached_data or not check_password_hash(cached_data, otp_code):
-        return APIResponse.error(
-            error='One-time password is invalid or expired.', status=400
-        )
+        abort(400, 'One-time password is invalid or expired')
 
     # Update user verification status
-    user = UserModel.query.filter(UserModel.email == email).first()
-    if type(user) is not UserModel:
-        return APIResponse.error(error='User not found.', status=400)
-
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
     if user.is_verified:
-        return APIResponse.error(error='User already verified.', status=400)
+        abort(400, 'User already verified')
 
     user.is_verified = True
     user.update()
 
     # Delete cache
     Cache.delete(f'otp_{email}')
-    return APIResponse.success(message='Email verified successfully.')
+    return APIResponse.success(message='Email verified successfully')
 
 
 @bp.get('/me')
@@ -186,15 +189,15 @@ def me():
         pass
 
     # Get user from database
-    user = UserModel.query.filter(UserModel.id == identity).first()
-    if type(user) is not UserModel:
-        return APIResponse.error(error='User not found.', status=400)
+    user: UserModel = UserModel.query.filter(
+        UserModel.id == identity
+    ).first_or_404()
 
     data = {'id': user.id, 'avatar': user.avatar, 'name': user.name}
     try:
         Cache.set(f'me_{identity}', data)
     except Exception as e:
-        logger.error(f'Error caching /me endpoint: {e}')
+        logger.error(f'Error caching ME endpoint: {e}')
 
     return APIResponse.success(data=data)
 
@@ -204,32 +207,31 @@ def forgot_password():
     from werkzeug.security import check_password_hash, generate_password_hash
 
     # Input validation
-    email = request.json.get('email')
-    otp_code = request.json.get('otp_code')
-    new_password = request.json.get('new_password')
+    data = request.get_json()
+    email = data['email']
+    otp_code = data['otp_code']
+    new_password = data['new_password']
+
     if not (
         all([email, otp_code, new_password])
         and re.match(EMAIL_REGEX, email)
         and re.match(OTP_CODE_REGEX, otp_code)
         and re.match(PASSWORD_REGEX, new_password)
     ):
-        return APIResponse.error(error=INVALID_INPUT, status=400)
+        abort(400, INVALID_INPUT)
 
     # Check cache
     cached_data = Cache.get(f'otp_{email}')
     if not cached_data or not check_password_hash(cached_data, otp_code):
-        return APIResponse.error(
-            error='One-time password is invalid or expired.', status=400
-        )
+        abort(400, 'One-time password is invalid or expired')
 
     # Update user password
-    user = UserModel.query.filter(UserModel.email == email).first()
-    if type(user) is not UserModel:
-        return APIResponse.error(error='User not found.', status=400)
-
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == email
+    ).first_or_404()
     user.password = generate_password_hash(new_password)
     user.update()
 
     # Delete cache
     Cache.delete(f'otp_{email}')
-    return APIResponse.success(message='Password reset successfully.')
+    return APIResponse.success(message='Password reset successfully')
