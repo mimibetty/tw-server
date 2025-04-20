@@ -28,7 +28,7 @@ def health_check():
 @bp.errorhandler(PyJWTError)
 def unauthorized_handler(_: PyJWTError):
     """Handle JWT errors."""
-    return APIResponse.error(erro='Unauthorized', status=401)
+    return APIResponse.error(error='Unauthorized', status=401)
 
 
 # HTTP Exceptions
@@ -43,4 +43,4 @@ def http_exception_handler(e: HTTPException):
 def exception_handler(e: Exception):
     """Handle all unhandled exceptions."""
     logger.error(f'Unhandled exception: {e}', exc_info=True)
-    return APIResponse.error(message='Internal Server Error', status=500)
+    return APIResponse.error(error='Internal Server Error', status=500)

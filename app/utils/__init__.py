@@ -1,12 +1,21 @@
-def get_neo4j():
-    """Create a Neo4j driver instance."""
+def execute_neo4j_query(query: str, params: dict = None, single: bool = False):
     from neo4j import GraphDatabase
 
     from ..environments import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USERNAME
 
-    return GraphDatabase.driver(
+    driver = GraphDatabase.driver(
         NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
     )
+    try:
+        with driver.session() as session:
+            result = session.run(query, params)
+            if single:
+                result = result.single()
+            return result.data()
+    except Exception as e:
+        raise Exception(f'Error executing Neo4j query: {e}')
+    finally:
+        driver.close()
 
 
 def request_gemini(contents: str, model: str = 'gemini-2.0-flash'):

@@ -4,8 +4,8 @@ BASE_DIR = os.getcwd()
 TEMPLATES_DIR = os.path.join(BASE_DIR, 'app', 'templates')
 
 # Pagination
-DEFAULT_LIMIT = 10
-MAX_LIMIT = 50
+DEFAULT_PAGINATION_LIMIT = 10
+MAX_PAGINATION_LIMIT = 50
 
 # Messages
 SUCCESS_MESSAGE = 'Success'

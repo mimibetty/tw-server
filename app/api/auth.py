@@ -49,7 +49,7 @@ def sign_in():
     refresh_token = create_refresh_token(identity=user.get_id())
     return APIResponse.success(
         message='Sign in successfully',
-        data={'accessToken': access_token, 'refreshToken': refresh_token},
+        payload={'accessToken': access_token, 'refreshToken': refresh_token},
     )
 
 
@@ -60,7 +60,7 @@ def refresh():
     access_token = create_access_token(identity=identity)
     return APIResponse.success(
         message='Token refreshed successfully',
-        data={'accessToken': access_token},
+        payload={'accessToken': access_token},
     )
 
 
@@ -184,7 +184,7 @@ def me():
     try:
         cached_data = Cache.get(f'me_{identity}')
         if cached_data:
-            return APIResponse.success(data=cached_data)
+            return APIResponse.success(payload=cached_data)
     except Exception:
         pass
 
@@ -199,7 +199,7 @@ def me():
     except Exception as e:
         logger.error(f'Error caching ME endpoint: {e}')
 
-    return APIResponse.success(data=data)
+    return APIResponse.success(payload=data)
 
 
 @bp.post('/forgot-password')
