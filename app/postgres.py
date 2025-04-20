@@ -115,7 +115,7 @@ class UserReviewModel(BaseModel):
 
     # Fields
     images = Column(ARRAY(String(255)), nullable=True)
-    place_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    place_id = Column(String(100), nullable=False, index=True)
     rating = Column(Integer, nullable=False)
     text = Column(String(255), nullable=False)
     user_id = Column(
@@ -177,7 +177,7 @@ class UserFavoriteModel(BaseModel):
     __tablename__ = 'user_favorites'
 
     # Fields
-    place_id = Column(UUID(as_uuid=True), index=True, nullable=False)
+    place_id = Column(String(100), index=True, nullable=False)
     user_id = Column(
         UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
     )

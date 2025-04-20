@@ -1,8 +1,8 @@
-"""Initial db.
+"""Initial migrations.
 
-Revision ID: 7037705de1ec
+Revision ID: 66f0fb947c1f
 Revises: 
-Create Date: 2025-04-11 14:47:15.133058
+Create Date: 2025-04-20 15:54:20.661378
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '7037705de1ec'
+revision = '66f0fb947c1f'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -35,7 +35,7 @@ def upgrade():
         batch_op.create_index(batch_op.f('ix_users_id'), ['id'], unique=False)
 
     op.create_table('user_favorites',
-    sa.Column('place_id', sa.UUID(), nullable=False),
+    sa.Column('place_id', sa.String(length=100), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
@@ -50,7 +50,7 @@ def upgrade():
 
     op.create_table('user_reviews',
     sa.Column('images', sa.ARRAY(sa.String(length=255)), nullable=True),
-    sa.Column('place_id', sa.UUID(), nullable=False),
+    sa.Column('place_id', sa.String(length=100), nullable=False),
     sa.Column('rating', sa.Integer(), nullable=False),
     sa.Column('text', sa.String(length=255), nullable=False),
     sa.Column('user_id', sa.UUID(), nullable=False),
