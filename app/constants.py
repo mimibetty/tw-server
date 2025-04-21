@@ -9,7 +9,6 @@ MAX_PAGINATION_LIMIT = 50
 
 # Messages
 SUCCESS_MESSAGE = 'Success'
-INVALID_INPUT = 'Invalid input format'
 
 # Regex patterns for validation
 EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'

@@ -1,9 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, abort, request
 
-from app.constants import DEFAULT_PAGINATION_LIMIT, MAX_PAGINATION_LIMIT
+from app.constants import MAX_PAGINATION_LIMIT
+from app.schemas.cities import CitySchema
 from app.utils import execute_neo4j_query
 from app.utils.response import APIResponse
 
@@ -12,74 +13,51 @@ bp = Blueprint('cities', __name__, url_prefix='/cities')
 
 @bp.post('/')
 def create_city():
-    data = request.get_json()
-    name = data['name']
-    postal_code = data['postal_code']
+    schema = CitySchema()
+    inputs = schema.load(request.get_json())
 
     # Query the database
     result = execute_neo4j_query(
         """
-        CREATE (c:City {id: $id, created_at: $created_at, name: $name, postal_code: $postal_code})
+        MERGE (c:City {postal_code: $postal_code})
+        SET
+            c.id = $id,
+            c.created_at = $created_at,
+            c.name = $name
         RETURN c
         """,
         {
             'id': str(uuid.uuid4()),
-            'created_at': datetime.now().isoformat(),
-            'name': name,
-            'postal_code': postal_code,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'name': inputs['name'],
+            'postal_code': inputs['postal_code'],
         },
-        single=True,
     )
     if not result:
         abort(500, 'Something went wrong')
 
-    return APIResponse.success(
-        payload=result['c'],
-        message='City created successfully',
-        status=201,
-    )
+    return APIResponse.success(payload=schema.dump(result['c']), status=201)
 
 
 @bp.get('/')
 def get_cities():
-    limit = request.args.get(
-        'limit', default=DEFAULT_PAGINATION_LIMIT, type=int
+    limit = min(
+        request.args.get('limit', default=10, type=int), MAX_PAGINATION_LIMIT
     )
-    offset = request.args.get('offset', default=0, type=int)
+    offset = max(request.args.get('offset', default=0, type=int), 0)
 
-    if not 0 < limit <= MAX_PAGINATION_LIMIT:
-        abort(400, f'Limit must be between 1 and {MAX_PAGINATION_LIMIT}')
-    if offset < 0:
-        abort(400, 'Offset cannot be negative')
-
-    result = execute_neo4j_query(
+    results = execute_neo4j_query(
         """
         MATCH (c:City) RETURN c
+        ORDER BY c.created_at DESC
         SKIP $offset LIMIT $limit
         """,
         {'offset': offset, 'limit': limit},
+        many=True,
     )
     return APIResponse.success(
-        payload=[record.get('c') for record in result], status=200
+        payload={
+            'data': [CitySchema().dump(result['c']) for result in results],
+            'pagination': {},
+        },
     )
-
-
-@bp.delete('/<city_id>')
-def delete_city(city_id):
-    result = execute_neo4j_query(
-        """
-        MATCH (c:City)
-        WHERE c.id = $id
-        DELETE c
-        RETURN COUNT(c) AS deleted_count
-        """,
-        {'id': city_id},
-        single=True,
-    )
-    if not result:
-        abort(500, 'Something went wrong')
-
-    if result['deleted_count'] == 0:
-        abort(404, 'City not found')
-
-    return APIResponse.success(status=200)

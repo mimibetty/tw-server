@@ -2,6 +2,7 @@ import logging
 
 from flask import Blueprint
 from jwt.exceptions import PyJWTError
+from marshmallow import ValidationError
 from werkzeug.exceptions import HTTPException
 
 from app.utils.response import APIResponse
@@ -29,6 +30,13 @@ def health_check():
 def unauthorized_handler(_: PyJWTError):
     """Handle JWT errors."""
     return APIResponse.error(error='Unauthorized', status=401)
+
+
+# Validation Errors
+@bp.errorhandler(ValidationError)
+def validation_error_handler(e: ValidationError):
+    """Handle validation errors."""
+    return APIResponse.error(error=e.messages, status=400)
 
 
 # HTTP Exceptions

@@ -13,7 +13,7 @@ from .environments import (
     REDIS_USERNAME,
     Config,
 )
-from .extensions import cors, jwt, mail, migrate
+from .extensions import cors, jwt, ma, mail, migrate
 from .postgres import db
 
 
@@ -38,6 +38,7 @@ class AppContext:
 
         # Initialize extensions
         db.init_app(self._app)
+        ma.init_app(self._app)
         jwt.init_app(self._app)
         cors.init_app(self._app)
         mail.init_app(self._app)
