@@ -18,7 +18,7 @@ bp.register_blueprint(auth_bp)
 bp.register_blueprint(users_bp)
 
 
-@bp.get('/health')
+@bp.get('/health/')
 def health_check():
     """Health check endpoint."""
     return APIResponse.success(message='OK')

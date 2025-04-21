@@ -116,9 +116,9 @@ def send_otp():
 
     # Generate OTP code
     otp_code = generate_otp_code()
-    Cache.delete(f'otp_{email}')
+    Cache.delete('otp', email)
     Cache.set(
-        f'otp_{email}', generate_password_hash(otp_code), expire_in_minutes=5
+        'otp', email, generate_password_hash(otp_code), expire_in_minutes=5
     )
 
     # Send OTP code via email
@@ -157,7 +157,7 @@ def verify_email():
     ):
         abort(400, INVALID_INPUT)
 
-    cached_data = Cache.get(f'otp_{email}')
+    cached_data = Cache.get('otp', email)
     if not cached_data or not check_password_hash(cached_data, otp_code):
         abort(400, 'One-time password is invalid or expired')
 
@@ -172,7 +172,7 @@ def verify_email():
     user.update()
 
     # Delete cache
-    Cache.delete(f'otp_{email}')
+    Cache.delete('otp', email)
     return APIResponse.success(message='Email verified successfully')
 
 
@@ -182,7 +182,7 @@ def me():
     # Check cache
     identity = get_jwt_identity()
     try:
-        cached_data = Cache.get(f'me_{identity}')
+        cached_data = Cache.get('me', identity)
         if cached_data:
             return APIResponse.success(payload=cached_data)
     except Exception:
@@ -195,7 +195,7 @@ def me():
 
     data = {'id': user.id, 'avatar': user.avatar, 'name': user.name}
     try:
-        Cache.set(f'me_{identity}', data)
+        Cache.set('me', identity, data)
     except Exception as e:
         logger.error(f'Error caching ME endpoint: {e}')
 
@@ -221,7 +221,7 @@ def forgot_password():
         abort(400, INVALID_INPUT)
 
     # Check cache
-    cached_data = Cache.get(f'otp_{email}')
+    cached_data = Cache.get('otp', email)
     if not cached_data or not check_password_hash(cached_data, otp_code):
         abort(400, 'One-time password is invalid or expired')
 
@@ -233,5 +233,5 @@ def forgot_password():
     user.update()
 
     # Delete cache
-    Cache.delete(f'otp_{email}')
+    Cache.delete('otp', email)
     return APIResponse.success(message='Password reset successfully')

@@ -1,26 +1,38 @@
+from typing import Optional
+
+
 class Cache:
     @staticmethod
-    def set(key: str, data: dict, expire_in_minutes: int = 60):
+    def set(
+        prefix: str,
+        key: Optional[str],
+        data: dict,
+        expire_in_minutes: int = 60,
+    ):
         import json
 
         from app import AppContext
 
         try:
             redis = AppContext().get_redis()
-            redis.set(key, json.dumps(data, sort_keys=True))
-            redis.expire(key, expire_in_minutes * 60)
+            name = prefix + '_' + key if key else prefix
+
+            redis.set(name, json.dumps(data, sort_keys=True))
+            redis.expire(name, expire_in_minutes * 60)
         except Exception as e:
             raise e
 
     @staticmethod
-    def get(key: str) -> dict:
+    def get(prefix: str, key: Optional[str]) -> dict:
         import json
 
         from app import AppContext
 
         try:
             redis = AppContext().get_redis()
-            data = redis.get(key)
+            name = prefix + '_' + key if key else prefix
+
+            data = redis.get(name)
             if data:
                 return json.loads(data)
             return None
@@ -28,12 +40,13 @@ class Cache:
             raise e
 
     @staticmethod
-    def delete(key: str):
+    def delete(prefix: str, key: Optional[str]):
         from app import AppContext
 
         try:
             redis = AppContext().get_redis()
-            redis.delete(key)
+            name = prefix + '_' + key if key else prefix
+            redis.delete(name)
         except Exception as e:
             raise e
 
