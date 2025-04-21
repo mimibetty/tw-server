@@ -1,4 +1,4 @@
-def execute_neo4j_query(query: str, params: dict = None, many: bool = False):
+def execute_neo4j_query(query: str, params: dict = None):
     from neo4j import GraphDatabase
 
     from ..environments import NEO4J_PASSWORD, NEO4J_URI, NEO4J_USERNAME
@@ -9,12 +9,7 @@ def execute_neo4j_query(query: str, params: dict = None, many: bool = False):
     try:
         with driver.session() as session:
             result = session.run(query, params)
-            if many and result:
-                return [record.data() if record else None for record in result]
-            elif many and not result:
-                return []
-
-            return result.single().data() if result else None
+            return result
     except Exception as e:
         raise Exception(f'Error executing Neo4j query: {e}')
     finally:

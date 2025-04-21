@@ -20,10 +20,7 @@ def create_city():
     result = execute_neo4j_query(
         """
         MERGE (c:City {postal_code: $postal_code})
-        SET
-            c.id = $id,
-            c.created_at = $created_at,
-            c.name = $name
+        SET c.id = $id, c.created_at = $created_at, c.name = $name
         RETURN c
         """,
         {
@@ -46,18 +43,22 @@ def get_cities():
     )
     offset = max(request.args.get('offset', default=0, type=int), 0)
 
+    # Query the database
     results = execute_neo4j_query(
         """
-        MATCH (c:City) RETURN c
-        ORDER BY c.created_at DESC
-        SKIP $offset LIMIT $limit
+        MATCH (c:City)
+        RETURN c
+        ORDER BY c.created_at DESC SKIP $offset
+        LIMIT $limit
         """,
         {'offset': offset, 'limit': limit},
-        many=True,
     )
+
+    # Process the results
+    schema = CitySchema()
     return APIResponse.success(
         payload={
-            'data': [CitySchema().dump(result['c']) for result in results],
+            'data': [schema.dump(item.get('c')) for item in results.data()],
             'pagination': {},
         },
     )
