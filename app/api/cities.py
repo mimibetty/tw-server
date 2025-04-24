@@ -43,16 +43,8 @@ def get_cities():
 
         # Query the database for total records
         total_records_result = execute_neo4j_query(
-            """
-            MATCH (c:City) RETURN count(c) as total_records
-            """
+            'MATCH (c:City) RETURN count(c) as total_records'
         )
-        total_records = total_records_result[0]['total_records']
-
-        # Calculate pagination details
-        total_pages = (total_records + per_page - 1) // per_page
-        next_page = page + 1 if page < total_pages else None
-        prev_page = page - 1 if page > 1 else None
 
         # Query the database for paginated results
         results = execute_neo4j_query(
@@ -65,18 +57,11 @@ def get_cities():
 
         # Process the results
         schema = CitySchema()
-        return APIResponse.success(
-            payload={
-                'data': [schema.dump(item.get('c')) for item in results],
-                'pagination': {
-                    'total_records': total_records,
-                    'current_page': page,
-                    'total_pages': total_pages,
-                    'per_page': per_page,
-                    'next_page': next_page,
-                    'prev_page': prev_page,
-                },
-            },
+        return APIResponse.paginate(
+            data=[schema.dump(item.get('c')) for item in results],
+            page=page,
+            per_page=per_page,
+            total_records=total_records_result[0]['total_records'],
         )
     except Exception as e:
         abort(500, str(e))
