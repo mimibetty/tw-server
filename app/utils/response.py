@@ -1,11 +1,6 @@
-from ..constants import SUCCESS_MESSAGE
-
-
 class APIResponse:
     @staticmethod
-    def success(
-        payload=None, message: str = SUCCESS_MESSAGE, status: int = 200
-    ):
+    def success(payload=None, message: str = 'Success', status: int = 200):
         """Return a success response."""
         import json
 

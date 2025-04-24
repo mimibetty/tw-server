@@ -19,7 +19,7 @@ bp.register_blueprint(auth_bp)
 bp.register_blueprint(users_bp)
 
 
-@bp.get('/health/')
+@bp.get('/health')
 def health_check():
     """Health check endpoint."""
     return APIResponse.success(message='OK')
@@ -44,11 +44,3 @@ def validation_error_handler(e: ValidationError):
 def http_exception_handler(e: HTTPException):
     """Handle HTTP exceptions."""
     return APIResponse.error(error=e.description, status=e.code)
-
-
-# Exceptions
-@bp.errorhandler(Exception)
-def exception_handler(e: Exception):
-    """Handle all unhandled exceptions."""
-    logger.error(f'Unhandled exception: {e}', exc_info=True)
-    return APIResponse.error(error='Internal Server Error', status=500)

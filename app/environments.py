@@ -15,7 +15,7 @@ NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD')
 
 # Redis
 REDIS_HOST = os.getenv('REDIS_HOST') or 'localhost'
-REDIS_PORT = int(os.getenv('REDIS_PORT') or 6379)
+REDIS_PORT = os.getenv('REDIS_PORT')
 REDIS_DB = 0
 REDIS_USERNAME = os.getenv('REDIS_USERNAME')
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')

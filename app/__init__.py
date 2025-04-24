@@ -28,7 +28,7 @@ class AppContext:
         # Initialize Redis
         self._redis = redis.Redis(
             host=REDIS_HOST,
-            port=REDIS_PORT,
+            port=int(REDIS_PORT),
             db=REDIS_DB,
             decode_responses=True,
             username=REDIS_USERNAME,
