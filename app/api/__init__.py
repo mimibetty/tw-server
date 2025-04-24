@@ -7,15 +7,17 @@ from werkzeug.exceptions import HTTPException
 
 from app.utils.response import APIResponse
 
-from .admin import bp as admin_bp
 from .auth import bp as auth_bp
+from .cities import bp as cities_bp
+from .things_to_do import bp as things_to_do_bp
 from .users import bp as users_bp
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('api', __name__, url_prefix='/api')
-bp.register_blueprint(admin_bp)
 bp.register_blueprint(auth_bp)
+bp.register_blueprint(cities_bp)
+bp.register_blueprint(things_to_do_bp)
 bp.register_blueprint(users_bp)
 
 
