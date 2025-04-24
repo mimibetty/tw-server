@@ -8,6 +8,6 @@ from .environments import CORS_ORIGINS
 
 ma = Marshmallow()
 jwt = JWTManager()
-cors = CORS(origins=CORS_ORIGINS)
+cors = CORS(resources={r'/*': {'origins': CORS_ORIGINS}})
 mail = Mail()
 migrate = Migrate()

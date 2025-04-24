@@ -30,7 +30,7 @@ def create_city():
             },
         )
         return APIResponse.success(
-            payload=schema.dump(result['c']), status=201
+            payload=schema.dump(result[0]['c']), status=201
         )
     except Exception as e:
         abort(500, str(e))
@@ -38,26 +38,29 @@ def create_city():
 
 @bp.get('')
 def get_cities():
-    limit = min(
-        request.args.get('limit', default=10, type=int), MAX_PAGINATION_LIMIT
-    )
-    offset = max(request.args.get('offset', default=0, type=int), 0)
+    try:
+        limit = min(
+            request.args.get('limit', default=10, type=int),
+            MAX_PAGINATION_LIMIT,
+        )
+        offset = max(request.args.get('offset', default=0, type=int), 0)
 
-    # Query the database
-    results = execute_neo4j_query(
-        """
-        MATCH (c:City) RETURN c
-        ORDER BY c.postalCode DESC SKIP $offset LIMIT $limit
-        """,
-        {'offset': offset, 'limit': limit},
-        many=True,
-    )
+        # Query the database
+        results = execute_neo4j_query(
+            """
+            MATCH (c:City) RETURN c
+            ORDER BY c.postalCode SKIP $offset LIMIT $limit
+            """,
+            {'offset': offset, 'limit': limit},
+        )
 
-    # Process the results
-    schema = CitySchema()
-    return APIResponse.success(
-        payload={
-            'data': [schema.dump(item.get('c')) for item in results],
-            'pagination': {},
-        },
-    )
+        # Process the results
+        schema = CitySchema()
+        return APIResponse.success(
+            payload={
+                'data': [schema.dump(item.get('c')) for item in results],
+                'pagination': {},
+            },
+        )
+    except Exception as e:
+        abort(500, str(e))
