@@ -1,7 +1,7 @@
 from app import AppContext
 from app.environments import DevelopmentConfig
 from app.api.admin.cities import drop_neo4j_database, test_create_city, test_get_cities
-from app.api.admin.location import test_create_location
+from app.api.admin.location import test_create_location, bulk_insert_locations_from_api
 
 app = AppContext().get_app()
 
@@ -12,6 +12,7 @@ if __name__ == '__main__':
     # print(test_create_city())
     # print(test_get_cities())
     # print(test_create_location())
+    # print(bulk_insert_locations_from_api())
     app.run(host='0.0.0.0', port='8000')
 
 

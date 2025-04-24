@@ -299,3 +299,72 @@ def get_location_by_id(location_id):
     if not result:
         return APIResponse.error('Location not found.', status=404)
     return APIResponse.success(payload=result[0]['l'])
+
+
+def bulk_insert_locations_from_api():
+    """
+    Fetch all locations from the API and insert them into Neo4j under city postal_code '550000'.
+    Returns a summary dict.
+    """
+    url = "https://api.apify.com/v2/datasets/Z2rig8cqAIhDAlJqZ/items?clean=true&fields=name,address,addressObj,description,longitude,latitude,ratingHistogram,subtype,rawRanking,rating,numberOfReviews,phone,webUrl,website,image,photos&format=json"
+    response = requests.get(url)
+    data = response.json()
+    if not data:
+        return {'success': False, 'error': 'No data from API'}
+    inserted = 0
+    errors = []
+    for loc in data:
+        try:
+            addressObj = loc.get('addressObj') or {}
+            address = loc.get('address')
+            _address = addressObj.get('street1') if addressObj.get('street1') else address
+            photos = loc.get('photos', [])[:10]
+            ratingHistogram = loc.get('ratingHistogram') or {}
+            props = {
+                'id': str(uuid.uuid4()),
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'name': loc.get('name'),
+                'address': address,
+                'description': loc.get('description'),
+                'longitude': loc.get('longitude'),
+                'latitude': loc.get('latitude'),
+                'subtype': loc.get('subtype'),
+                'rawRanking': loc.get('rawRanking'),
+                'rating': loc.get('rating'),
+                'numberOfReviews': loc.get('numberOfReviews'),
+                'phone': loc.get('phone'),
+                'webUrl': loc.get('webUrl'),
+                'website': loc.get('website'),
+                'image': loc.get('image'),
+                'photos': photos,
+                '_address': _address,
+                'ratingHistogram_count1': ratingHistogram.get('count1'),
+                'ratingHistogram_count2': ratingHistogram.get('count2'),
+                'ratingHistogram_count3': ratingHistogram.get('count3'),
+                'ratingHistogram_count4': ratingHistogram.get('count4'),
+                'ratingHistogram_count5': ratingHistogram.get('count5'),
+                'addressObj_street1': addressObj.get('street1'),
+                'addressObj_street2': addressObj.get('street2'),
+                'addressObj_city': addressObj.get('city'),
+                'addressObj_state': addressObj.get('state'),
+                'addressObj_country': addressObj.get('country'),
+                'addressObj_postalcode': addressObj.get('postalcode'),
+            }
+            result = execute_neo4j_query(
+                '''
+                MERGE (c:City {postal_code: $city_postal_code})
+                MERGE (l:Location {name: $props.name, longitude: $props.longitude, latitude: $props.latitude})
+                ON CREATE SET l += $props
+                ON MATCH SET l += $props
+                MERGE (c)-[:HAS_LOCATION]->(l)
+                RETURN l
+                ''',
+                {'city_postal_code': '550000', 'props': props}
+            )
+            if result:
+                inserted += 1
+            else:
+                errors.append(loc.get('name'))
+        except Exception as e:
+            errors.append(f"{loc.get('name')}: {e}")
+    return {'success': True, 'inserted': inserted, 'errors': errors}
