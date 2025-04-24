@@ -15,7 +15,7 @@ class APIResponse:
         )
 
     @staticmethod
-    def error(error: str, status: int):
+    def error(error, status: int):
         """Return an error response."""
         import json
 

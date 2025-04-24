@@ -8,9 +8,9 @@ bp = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
 
 @bp.post('')
 def create_things_to_do():
+    schema = ThingToDoSchema()
+    inputs = schema.load(request.json)
     try:
-        schema = ThingToDoSchema()
-        inputs = schema.load(request.json)
         return APIResponse.success(payload=inputs, status=201)
     except Exception as e:
         abort(500, str(e))

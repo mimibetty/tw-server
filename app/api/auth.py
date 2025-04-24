@@ -24,8 +24,8 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 @bp.post('/sign-in')
 def sign_in():
+    inputs = SignInSchema().load(request.json)
     try:
-        inputs = SignInSchema().load(request.json)
         user: UserModel = UserModel.query.filter(
             UserModel.email == inputs['email']
         ).first_or_404()
@@ -37,8 +37,8 @@ def sign_in():
         refresh_token = create_refresh_token(identity=user.get_id())
         return APIResponse.success(
             payload={
-                'accessToken': access_token,
-                'refreshToken': refresh_token,
+                'access_token': access_token,
+                'refresh_token': refresh_token,
             }
         )
     except Exception as e:
@@ -51,24 +51,21 @@ def refresh():
     try:
         identity = get_jwt_identity()
         access_token = create_access_token(identity=identity)
-        return APIResponse.success(payload={'accessToken': access_token})
+        return APIResponse.success(payload={'access_token': access_token})
     except Exception as e:
         abort(500, str(e))
 
 
 @bp.post('/sign-up')
 def sign_up():
+    inputs = SignUpSchema().load(request.json)
     try:
-        inputs = SignUpSchema().load(request.json)
-
-        # Check if user already exists
         existing_user = UserModel.query.filter(
             UserModel.email == inputs['email']
         ).first()
         if type(existing_user) is UserModel:
             abort(400, 'Email already exists')
 
-        # Query database
         user = UserModel(inputs['email'], inputs['password'], inputs['name'])
         user.add()
         return APIResponse.success(status=201)
@@ -78,10 +75,8 @@ def sign_up():
 
 @bp.post('/send-otp')
 def send_otp():
+    inputs = SendOTPSchema().load(request.json)
     try:
-        inputs = SendOTPSchema().load(request.json)
-
-        # Check if user exists
         user: UserModel = UserModel.query.filter(
             UserModel.email == inputs['email']
         ).first_or_404()
@@ -127,10 +122,8 @@ def send_otp():
 
 @bp.post('/verify-email')
 def verify_email():
+    inputs = SendOTPSchema().load(request.json)
     try:
-        inputs = SendOTPSchema().load(request.json)
-
-        # Read cache
         cache = Cache.get('otp', inputs['email'])
         if not cache or not check_password_hash(cache, inputs['otp']):
             abort(400, 'One-time password is invalid or expired')
@@ -173,10 +166,8 @@ def me():
 
 @bp.post('/forgot-password')
 def forgot_password():
+    inputs = ForgotPasswordSchema().load(request.json)
     try:
-        inputs = ForgotPasswordSchema().load(request.json)
-
-        # Read cache
         cache = Cache.get('otp', inputs['email'])
         if not cache or not check_password_hash(cache, inputs['otp']):
             abort(400, 'One-time password is invalid or expired')
