@@ -25,162 +25,146 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 @bp.post('/sign-in')
 def sign_in():
     inputs = SignInSchema().load(request.json)
-    try:
-        user: UserModel = UserModel.query.filter(
-            UserModel.email == inputs['email']
-        ).first_or_404()
-        if not user.check_password(inputs['password']):
-            abort(400, 'Invalid email or password')
 
-        # Create JWT tokens
-        access_token = create_access_token(identity=user.get_id())
-        refresh_token = create_refresh_token(identity=user.get_id())
-        return APIResponse.success(
-            payload={
-                'access_token': access_token,
-                'refresh_token': refresh_token,
-            }
-        )
-    except Exception as e:
-        abort(500, str(e))
+    # Query user from database
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == inputs['email']
+    ).first_or_404()
+    if not user.check_password(inputs['password']):
+        abort(400, 'Invalid email or password')
+
+    # Create tokens
+    access_token = create_access_token(identity=user.get_id())
+    refresh_token = create_refresh_token(identity=user.get_id())
+    return APIResponse.success(
+        data={'access_token': access_token, 'refresh_token': refresh_token}
+    )
 
 
 @bp.post('/refresh')
 @jwt_required(refresh=True)
 def refresh():
-    try:
-        identity = get_jwt_identity()
-        access_token = create_access_token(identity=identity)
-        return APIResponse.success(payload={'access_token': access_token})
-    except Exception as e:
-        abort(500, str(e))
+    identity = get_jwt_identity()
+    access_token = create_access_token(identity=identity)
+    return APIResponse.success(data={'access_token': access_token})
 
 
 @bp.post('/sign-up')
 def sign_up():
     inputs = SignUpSchema().load(request.json)
-    try:
-        existing_user = UserModel.query.filter(
-            UserModel.email == inputs['email']
-        ).first()
-        if type(existing_user) is UserModel:
-            abort(400, 'Email already exists')
-
-        user = UserModel(inputs['email'], inputs['password'], inputs['name'])
-        user.add()
-        return APIResponse.success(status=201)
-    except Exception as e:
-        abort(500, str(e))
+    user = UserModel(inputs['email'], inputs['password'], inputs['name'])
+    user.add()
+    return APIResponse.success(status=201)
 
 
 @bp.post('/send-otp')
 def send_otp():
     inputs = SendOTPSchema().load(request.json)
-    try:
-        user: UserModel = UserModel.query.filter(
-            UserModel.email == inputs['email']
-        ).first_or_404()
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == inputs['email']
+    ).first_or_404()
 
-        if not inputs['reset'] and user.is_verified:
-            abort(400, 'User already verified')
+    if not inputs['reset'] and user.is_verified:
+        abort(400, 'User already verified')
 
-        # Generate OTP code
-        otp_code = generate_otp_code()
-        Cache.delete('otp', inputs['email'])
-        Cache.set(
-            'otp',
-            inputs['email'],
-            generate_password_hash(otp_code),
-            expire_in_minutes=5,
+    # Generate OTP code
+    otp_code = generate_otp_code()
+
+    # Save to cache
+    Cache.delete('otp', inputs['email'])
+    Cache.set(
+        'otp',
+        inputs['email'],
+        generate_password_hash(otp_code),
+        expire_in_minutes=5,
+    )
+
+    # Send OTP code to user's email
+    if inputs['reset']:
+        # Reset password email
+        mail_html = render_template(
+            'email_reset_password.html', name=user.name, otp_code=otp_code
         )
-
-        # Send OTP code via email
-        if inputs['reset']:
-            mail_html = render_template(
-                'email_reset_password.html', name=user.name, otp_code=otp_code
-            )
-            send_async_email(
-                subject='Reset Password',
-                recipients=[user.email],
-                html=mail_html,
-            )
-        else:
-            mail_html = render_template(
-                'email_otp.html', name=user.name, otp_code=otp_code
-            )
-            send_async_email(
-                subject='Email Verification',
-                recipients=[user.email],
-                html=mail_html,
-            )
-        return APIResponse.success(
-            message='One-time password sent successfully'
+        send_async_email(
+            subject='Reset Password',
+            recipients=[user.email],
+            html=mail_html,
         )
-    except Exception as e:
-        abort(500, str(e))
+    else:
+        # Verification email
+        mail_html = render_template(
+            'email_otp.html', name=user.name, otp_code=otp_code
+        )
+        send_async_email(
+            subject='Email Verification',
+            recipients=[user.email],
+            html=mail_html,
+        )
+    return APIResponse.success()
 
 
 @bp.post('/verify-email')
 def verify_email():
     inputs = SendOTPSchema().load(request.json)
-    try:
-        cache = Cache.get('otp', inputs['email'])
-        if not cache or not check_password_hash(cache, inputs['otp']):
-            abort(400, 'One-time password is invalid or expired')
 
-        # Update user verification status
-        user: UserModel = UserModel.query.filter(
-            UserModel.email == inputs['email']
-        ).first_or_404()
-        if user.is_verified:
-            abort(400, 'User already verified')
-        user.is_verified = True
-        user.update()
+    # Check if cache exists
+    cache = Cache.get('otp', inputs['email'])
+    if not cache or not check_password_hash(cache, inputs['otp']):
+        abort(400, 'One-time password is invalid or expired')
 
-        # Delete cache
-        Cache.delete('otp', inputs['email'])
-        return APIResponse.success(message='Email verified successfully')
-    except Exception as e:
-        abort(500, str(e))
+    # Query user from database
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == inputs['email']
+    ).first_or_404()
+    if user.is_verified:
+        abort(400, 'User already verified')
+
+    # Update user verification status
+    user.is_verified = True
+    user.update()
+
+    # Delete cache
+    Cache.delete('otp', inputs['email'])
+    return APIResponse.success()
 
 
 @bp.get('/me')
 @jwt_required()
 def me():
-    try:
-        identity = get_jwt_identity()
-        cache = Cache.get('me', identity)
-        if cache:
-            return APIResponse.success(payload=cache)
+    identity = get_jwt_identity()
 
-        user: UserModel = UserModel.query.filter(
-            UserModel.id == identity
-        ).first_or_404()
+    # Check if cache exists
+    cached_data = Cache.get('me', identity)
+    if cached_data:
+        return APIResponse.success(data=cached_data)
 
-        data = MeSchema().dump(user)
-        Cache.set('me', identity, data)
-        return APIResponse.success(payload=data)
-    except Exception as e:
-        abort(500, str(e))
+    # Query user from database
+    user: UserModel = UserModel.query.filter(
+        UserModel.id == identity
+    ).first_or_404()
+
+    # Save to cache
+    data = MeSchema().dump(user)
+    Cache.set('me', identity, data)
+    return APIResponse.success(data=data)
 
 
 @bp.post('/forgot-password')
 def forgot_password():
     inputs = ForgotPasswordSchema().load(request.json)
-    try:
-        cache = Cache.get('otp', inputs['email'])
-        if not cache or not check_password_hash(cache, inputs['otp']):
-            abort(400, 'One-time password is invalid or expired')
 
-        # Update user password
-        user: UserModel = UserModel.query.filter(
-            UserModel.email == inputs['email']
-        ).first_or_404()
-        user.password = generate_password_hash(inputs['password'])
-        user.update()
+    # Check if cache exists
+    cache = Cache.get('otp', inputs['email'])
+    if not cache or not check_password_hash(cache, inputs['otp']):
+        abort(400, 'One-time password is invalid or expired')
 
-        # Delete cache
-        Cache.delete('otp', inputs['email'])
-        return APIResponse.success(message='Password reset successfully')
-    except Exception as e:
-        abort(500, str(e))
+    # Update user password
+    user: UserModel = UserModel.query.filter(
+        UserModel.email == inputs['email']
+    ).first_or_404()
+    user.password = generate_password_hash(inputs['password'])
+    user.update()
+
+    # Remove cache
+    Cache.delete('otp', inputs['email'])
+    return APIResponse.success()

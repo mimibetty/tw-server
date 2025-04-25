@@ -1,15 +1,12 @@
 class APIResponse:
     @staticmethod
-    def success(payload=None, message: str = 'Success', status: int = 200):
+    def success(data=None, status: int = 200):
         """Return a success response."""
         import json
 
         from flask import Response
 
-        response = json.dumps(
-            {'payload': payload, 'msg': message, 'status': status},
-            sort_keys=True,
-        )
+        response = json.dumps({'data': data, 'success': True}, sort_keys=True)
         return Response(
             response=response, status=status, mimetype='application/json'
         )
@@ -22,20 +19,14 @@ class APIResponse:
         from flask import Response
 
         response = json.dumps(
-            {'error': error, 'status': status}, sort_keys=True
+            {'error': error, 'success': False}, sort_keys=True
         )
         return Response(
             response=response, status=status, mimetype='application/json'
         )
 
     @staticmethod
-    def paginate(
-        data: list,
-        page: int,
-        per_page: int,
-        total_records: int,
-        message: str = 'Success',
-    ):
+    def paginate(data: list, page: int, per_page: int, total_records: int):
         """Return a paginated response."""
         import json
 
@@ -46,9 +37,7 @@ class APIResponse:
         prev_page = page - 1 if page > 1 else None
         response = json.dumps(
             {
-                'msg': message,
                 'data': data,
-                'page': page,
                 'pagination': {
                     'total_records': total_records,
                     'current_page': page,
@@ -57,6 +46,7 @@ class APIResponse:
                     'next_page': next_page,
                     'prev_page': prev_page,
                 },
+                'success': True,
             },
             sort_keys=True,
         )

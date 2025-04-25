@@ -21,28 +21,21 @@ bp.register_blueprint(things_to_do_bp)
 bp.register_blueprint(users_bp)
 
 
-@bp.get('/health')
-def health_check():
-    """Health check endpoint."""
-    return APIResponse.success(message='OK')
-
-
-# PyJWT Exceptions
 @bp.errorhandler(PyJWTError)
 def unauthorized_handler(_: PyJWTError):
-    """Handle JWT errors."""
     return APIResponse.error(error='Unauthorized', status=401)
 
 
-# Validation Errors
 @bp.errorhandler(ValidationError)
 def validation_error_handler(e: ValidationError):
-    """Handle validation errors."""
     return APIResponse.error(error=e.messages, status=400)
 
 
-# HTTP Exceptions
 @bp.errorhandler(HTTPException)
 def http_exception_handler(e: HTTPException):
-    """Handle HTTP exceptions."""
     return APIResponse.error(error=e.description, status=e.code)
+
+
+@bp.errorhandler(Exception)
+def generic_exception_handler(e: Exception):
+    return APIResponse.error(error=str(e), status=500)
