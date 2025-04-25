@@ -8,7 +8,10 @@ from app.postgres import UserModel
 
 class SignInSchema(ma.Schema):
     email = fields.Email(required=True)
-    password = fields.String(required=True)
+    password = fields.String(
+        required=True,
+        validate=Regexp(PASSWORD_REGEX, error='Invalid password format.'),
+    )
 
 
 class SignUpSchema(ma.Schema):
