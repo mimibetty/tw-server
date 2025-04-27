@@ -65,9 +65,13 @@ def get_chat_history():
     )
 
 
-@bp.get('/<conversation_id>')
+@bp.get('/messages')
 @jwt_required()
-def get_chat_messages(conversation_id):
+def get_history_messages():
+    conversation_id = request.args.get('id')
+    if not conversation_id:
+        abort(400, 'Conversation ID is required.')
+
     identity = get_jwt_identity()
     if not UserConversationsModel.query.filter(
         UserConversationsModel.user_id == identity,
