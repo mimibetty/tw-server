@@ -131,22 +131,25 @@ def verify_email():
 @bp.get('/me')
 @jwt_required()
 def me():
-    identity = get_jwt_identity()
+    try:
+        identity = get_jwt_identity()
 
-    # Check if cache exists
-    cached_data = Cache.get('me', identity)
-    if cached_data:
-        return APIResponse.success(data=cached_data)
+        # Check if cache exists
+        cached_data = Cache.get('me', identity)
+        if cached_data:
+            return APIResponse.success(data=cached_data)
 
-    # Query user from database
-    user: UserModel = UserModel.query.filter(
-        UserModel.id == identity
-    ).first_or_404()
+        # Query user from database
+        user: UserModel = UserModel.query.filter(
+            UserModel.id == identity
+        ).first_or_404()
 
-    # Save to cache
-    data = MeSchema().dump(user)
-    Cache.set('me', identity, data)
-    return APIResponse.success(data=data)
+        # Save to cache
+        data = MeSchema().dump(user)
+        Cache.set('me', identity, data)
+        return APIResponse.success(data=data)
+    except Exception:
+        abort(401, 'Unauthorized')
 
 
 @bp.post('/forgot-password')
