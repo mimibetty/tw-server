@@ -6,7 +6,7 @@ class APIResponse:
 
         from flask import Response
 
-        response = json.dumps({'data': data}, sort_keys=True)
+        response = json.dumps(data, sort_keys=True)
         return Response(
             response=response, status=status, mimetype='application/json'
         )
