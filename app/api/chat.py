@@ -1,9 +1,15 @@
 from flask import Blueprint, abort, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.constants import MAX_PAGINATION_PER_PAGE
-from app.postgres import UserConversationsModel, UserMessagesModel
-from app.schemas.chat import CreateChatMessageSchema, GetChatHistorySchema
+from app.postgres import (
+    MessagesModel,
+    UserConversationsModel,
+)
+from app.schemas.chat import (
+    ChatMessageSchema,
+    CreateChatMessageSchema,
+    GetChatHistorySchema,
+)
 from app.utils import request_gemini
 from app.utils.response import APIResponse
 
@@ -27,19 +33,22 @@ def create_chat_message():
     chat_response = request_gemini(contents=inputs['text'])
 
     # Save user message to the database
-    user_message = UserMessagesModel(
-        conversation_id=conversation_id, text=inputs['text']
+    user_message = MessagesModel(
+        conversation_id=conversation_id, text=inputs['text'], is_user=True
     )
     user_message.add()
 
     # Save bot message to the database
-    bot_message = UserMessagesModel(
-        conversation_id=conversation_id, text=chat_response
+    bot_message = MessagesModel(
+        conversation_id=conversation_id, text=chat_response, is_user=False
     )
     bot_message.add()
 
     return APIResponse.success(
-        data={'conversation_id': conversation_id, 'message': chat_response},
+        data={
+            'conversation_id': str(conversation_id),
+            'message': chat_response,
+        },
         status=201,
     )
 
@@ -59,9 +68,6 @@ def get_chat_history():
 @bp.get('/<conversation_id>')
 @jwt_required()
 def get_chat_messages(conversation_id):
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-
     identity = get_jwt_identity()
     if not UserConversationsModel.query.filter(
         UserConversationsModel.user_id == identity,
@@ -69,18 +75,7 @@ def get_chat_messages(conversation_id):
     ).first():
         abort(404, 'Conversation not found.')
 
-    result = (
-        UserMessagesModel.query.filter(
-            UserMessagesModel.conversation_id == conversation_id
-        )
-        .order_by(UserMessagesModel.created_at.desc())
-        .paginate(
-            page=page, per_page=per_page, max_per_page=MAX_PAGINATION_PER_PAGE
-        )
-    )
-    return APIResponse.paginate(
-        data=result.items,
-        total_records=result.total,
-        page=result.page,
-        per_page=result.per_page,
-    )
+    result = MessagesModel.query.filter(
+        MessagesModel.conversation_id == conversation_id
+    ).order_by(MessagesModel.created_at.desc())
+    return APIResponse.success(data=ChatMessageSchema(many=True).dump(result))

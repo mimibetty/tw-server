@@ -15,8 +15,8 @@ class SignInSchema(ma.Schema):
 
 
 class SignUpSchema(ma.Schema):
-    name = fields.String(required=True)
     email = fields.Email(required=True)
+    name = fields.String(required=True)
     password = fields.String(
         required=True,
         validate=Regexp(PASSWORD_REGEX, error='Invalid password format.'),

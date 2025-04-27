@@ -207,8 +207,8 @@ class UserConversationsModel(BaseModel):
         self.user_id = user_id
 
 
-class UserMessagesModel(BaseModel):
-    __tablename__ = 'user_messages'
+class MessagesModel(BaseModel):
+    __tablename__ = 'messages'
 
     # Fields
     conversation_id = Column(
@@ -217,8 +217,10 @@ class UserMessagesModel(BaseModel):
         nullable=False,
     )
     text = Column(Text, nullable=False)
+    is_user = Column(Boolean, nullable=False)
 
-    def __init__(self, conversation_id: str, text: str):
+    def __init__(self, conversation_id: str, text: str, is_user: bool):
         super().__init__()
         self.conversation_id = conversation_id
         self.text = text
+        self.is_user = is_user

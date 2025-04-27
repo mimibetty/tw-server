@@ -57,7 +57,7 @@ def sign_up():
     inputs = SignUpSchema().load(request.json)
     user = UserModel(inputs['email'], inputs['password'], inputs['name'])
     user.add()
-    return APIResponse.success(status=201)
+    return APIResponse.success(data={'email': user.email}, status=201)
 
 
 @bp.post('/send-otp')

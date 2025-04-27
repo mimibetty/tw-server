@@ -26,3 +26,9 @@ class CreateChatMessageSchema(ma.Schema):
 
 class GetChatHistorySchema(ma.Schema):
     id = fields.String(dump_only=True)
+
+
+class ChatMessageSchema(ma.Schema):
+    id = fields.String(dump_only=True)
+    text = fields.String()
+    is_user = fields.Boolean(dump_only=True)
