@@ -27,10 +27,10 @@ def sign_in():
     inputs = SignInSchema().load(request.json)
 
     # Query user from database
-    user: UserModel = UserModel.query.filter(
-        UserModel.email == inputs['email']
-    ).first_or_404()
-    if not user.check_password(inputs['password']):
+    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
+    if not (
+        type(user) is UserModel and user.check_password(inputs['password'])
+    ):
         abort(400, 'Invalid email or password')
 
     # Create tokens
@@ -44,9 +44,12 @@ def sign_in():
 @bp.post('/refresh')
 @jwt_required(refresh=True)
 def refresh():
-    identity = get_jwt_identity()
-    access_token = create_access_token(identity=identity)
-    return APIResponse.success(data={'access_token': access_token})
+    try:
+        identity = get_jwt_identity()
+        access_token = create_access_token(identity=identity)
+        return APIResponse.success(data={'access_token': access_token})
+    except Exception:
+        abort(401, 'Unauthorized')
 
 
 @bp.post('/sign-up')
@@ -60,9 +63,10 @@ def sign_up():
 @bp.post('/send-otp')
 def send_otp():
     inputs = SendOTPSchema().load(request.json)
-    user: UserModel = UserModel.query.filter(
-        UserModel.email == inputs['email']
-    ).first_or_404()
+    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
+
+    if type(user) is not UserModel:
+        abort(404, 'User not found')
 
     if not inputs['reset'] and user.is_verified:
         abort(400, 'User already verified')
@@ -113,9 +117,10 @@ def verify_email():
         abort(400, 'One-time password is invalid or expired')
 
     # Query user from database
-    user: UserModel = UserModel.query.filter(
-        UserModel.email == inputs['email']
-    ).first_or_404()
+    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
+    if type(user) is not UserModel:
+        abort(404, 'User not found')
+
     if user.is_verified:
         abort(400, 'User already verified')
 
@@ -140,9 +145,9 @@ def me():
             return APIResponse.success(data=cached_data)
 
         # Query user from database
-        user: UserModel = UserModel.query.filter(
-            UserModel.id == identity
-        ).first_or_404()
+        user = UserModel.query.filter(UserModel.id == identity).first()
+        if type(user) is not UserModel:
+            abort(404, 'User not found')
 
         # Save to cache
         data = MeSchema().dump(user)
@@ -162,9 +167,10 @@ def forgot_password():
         abort(400, 'One-time password is invalid or expired')
 
     # Update user password
-    user: UserModel = UserModel.query.filter(
-        UserModel.email == inputs['email']
-    ).first_or_404()
+    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
+    if type(user) is not UserModel:
+        abort(404, 'User not found')
+
     user.password = generate_password_hash(inputs['password'])
     user.update()
 

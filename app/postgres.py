@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -191,3 +192,33 @@ class UserFavoriteModel(BaseModel):
         super().__init__()
         self.place_id = place_id
         self.user_id = user_id
+
+
+class UserConversationsModel(BaseModel):
+    __tablename__ = 'user_conversations'
+
+    # Fields
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
+    )
+
+    def __init__(self, user_id: str):
+        super().__init__()
+        self.user_id = user_id
+
+
+class UserMessagesModel(BaseModel):
+    __tablename__ = 'user_messages'
+
+    # Fields
+    conversation_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey('user_conversations.id'),
+        nullable=False,
+    )
+    text = Column(Text, nullable=False)
+
+    def __init__(self, conversation_id: str, text: str):
+        super().__init__()
+        self.conversation_id = conversation_id
+        self.text = text

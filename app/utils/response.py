@@ -6,7 +6,7 @@ class APIResponse:
 
         from flask import Response
 
-        response = json.dumps({'data': data, 'success': True}, sort_keys=True)
+        response = json.dumps({'data': data}, sort_keys=True)
         return Response(
             response=response, status=status, mimetype='application/json'
         )
@@ -18,9 +18,7 @@ class APIResponse:
 
         from flask import Response
 
-        response = json.dumps(
-            {'error': error, 'success': False}, sort_keys=True
-        )
+        response = json.dumps({'error': error}, sort_keys=True)
         return Response(
             response=response, status=status, mimetype='application/json'
         )
@@ -46,7 +44,6 @@ class APIResponse:
                     'next_page': next_page,
                     'prev_page': prev_page,
                 },
-                'success': True,
             },
             sort_keys=True,
         )
