@@ -202,8 +202,8 @@ class UserConversationsModel(BaseModel):
         UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
     )
 
-    def __init__(self, user_id: str):
-        super().__init__()
+    def __init__(self, conversation_id: str, user_id: str):
+        self.id = conversation_id
         self.user_id = user_id
 
 

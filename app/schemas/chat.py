@@ -1,7 +1,6 @@
-from marshmallow import ValidationError, fields, validates
+from marshmallow import fields
 
 from app.extensions import ma
-from app.postgres import UserConversationsModel
 
 
 class CreateChatMessageSchema(ma.Schema):
@@ -14,21 +13,12 @@ class CreateChatMessageSchema(ma.Schema):
         required=True, error_messages={'required': 'Text is required.'}
     )
 
-    @validates('conversation_id')
-    def validate_conversation_id(self, value):
-        if value:
-            conversation_id = UserConversationsModel.query.filter(
-                UserConversationsModel.id == value
-            ).first()
-            if not conversation_id:
-                raise ValidationError('Conversation ID does not exist.')
-
 
 class GetChatHistorySchema(ma.Schema):
     id = fields.String(dump_only=True)
 
 
 class ChatMessageSchema(ma.Schema):
-    id = fields.String(dump_only=True)
+    id = fields.String(load_only=True)
     text = fields.String()
     is_user = fields.Boolean(dump_only=True)

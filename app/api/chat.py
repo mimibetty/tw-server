@@ -23,33 +23,35 @@ def create_chat_message():
     inputs = CreateChatMessageSchema().load(request.json)
 
     # Save chat conversation if it doesn't exist
-    conversation_id = inputs['conversation_id']
-    if not conversation_id:
-        new_conversation = UserConversationsModel(user_id=identity)
+    if not UserConversationsModel.query.filter(
+        UserConversationsModel.id == inputs['conversation_id']
+    ).first():
+        new_conversation = UserConversationsModel(
+            conversation_id=inputs['conversation_id'], user_id=identity
+        )
         new_conversation.add()
-        conversation_id = new_conversation.id
 
     # Request to Gemini API
     chat_response = request_gemini(contents=inputs['text'])
 
     # Save user message to the database
     user_message = MessagesModel(
-        conversation_id=conversation_id, text=inputs['text'], is_user=True
+        conversation_id=inputs['conversation_id'],
+        text=inputs['text'],
+        is_user=True,
     )
     user_message.add()
 
     # Save bot message to the database
     bot_message = MessagesModel(
-        conversation_id=conversation_id, text=chat_response, is_user=False
+        conversation_id=inputs['conversation_id'],
+        text=chat_response,
+        is_user=False,
     )
     bot_message.add()
 
     return APIResponse.success(
-        data={
-            'conversation_id': str(conversation_id),
-            'message': chat_response,
-        },
-        status=201,
+        data=ChatMessageSchema().dump(bot_message), status=201
     )
 
 
@@ -57,9 +59,13 @@ def create_chat_message():
 @jwt_required()
 def get_chat_history():
     identity = get_jwt_identity()
-    conversations = UserConversationsModel.query.filter(
-        UserConversationsModel.user_id == identity
-    ).all()
+    conversations = (
+        UserConversationsModel.query.filter(
+            UserConversationsModel.user_id == identity
+        )
+        .order_by(UserConversationsModel.created_at.desc())
+        .all()
+    )
     return APIResponse.success(
         data=GetChatHistorySchema(many=True).dump(conversations)
     )
@@ -77,9 +83,13 @@ def get_history_messages():
         UserConversationsModel.user_id == identity,
         UserConversationsModel.id == conversation_id,
     ).first():
-        abort(404, 'Conversation not found.')
+        return APIResponse.success(data=[])
 
-    result = MessagesModel.query.filter(
-        MessagesModel.conversation_id == conversation_id
-    ).order_by(MessagesModel.created_at.desc())
+    result = (
+        MessagesModel.query.filter(
+            MessagesModel.conversation_id == conversation_id
+        )
+        .order_by(MessagesModel.created_at.desc())
+        .all()
+    )
     return APIResponse.success(data=ChatMessageSchema(many=True).dump(result))
