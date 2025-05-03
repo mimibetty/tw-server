@@ -83,7 +83,9 @@ class UserModel(BaseModel):
     __tablename__ = 'users'
 
     # Fields
-    avatar = Column(String(255), nullable=True)
+    avatar = Column(
+        String(255), nullable=False, default='https://github.com/shadcn.png'
+    )
     email = Column(String(255), nullable=False, unique=True, index=True)
     is_admin = Column(Boolean, nullable=False, default=False)
     is_verified = Column(Boolean, nullable=False, default=False)
@@ -95,12 +97,10 @@ class UserModel(BaseModel):
         email: str,
         password: str,
         name: str,
-        avatar: str = None,
         is_admin: bool = False,
         is_verified: bool = False,
     ):
         super().__init__()
-        self.avatar = avatar
         self.email = email
         self.is_admin = is_admin
         self.is_verified = is_verified
@@ -119,9 +119,7 @@ class UserReviewModel(BaseModel):
     place_id = Column(String(100), nullable=False, index=True)
     rating = Column(Integer, nullable=False)
     text = Column(String(255), nullable=False)
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     # Constraints to ensure a user can review a place only once and rating is between 1 to 5
     __table_args__ = (
@@ -159,9 +157,7 @@ class ReviewReactionModel(BaseModel):
         index=True,
         nullable=False,
     )
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     # Constraint to ensure that a user can only react to a review once
     __table_args__ = (
@@ -179,9 +175,7 @@ class UserFavoriteModel(BaseModel):
 
     # Fields
     place_id = Column(String(100), index=True, nullable=False)
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     # Constraint to ensure that a user can only save a place once
     __table_args__ = (
@@ -198,9 +192,7 @@ class UserConversationsModel(BaseModel):
     __tablename__ = 'user_conversations'
 
     # Fields
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey('users.id'), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
 
     def __init__(self, conversation_id: str, user_id: str):
         self.id = conversation_id
