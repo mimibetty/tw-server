@@ -6,7 +6,6 @@ from flask.cli import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-CORS_ORIGINS = os.getenv('CORS_ORIGINS')
 
 # Neo4j
 NEO4J_URI = os.getenv('NEO4J_URI')

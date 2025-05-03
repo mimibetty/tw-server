@@ -138,14 +138,16 @@ def verify_email():
 def me():
     try:
         identity = get_jwt_identity()
-
         # Check if cache exists
-        cached_data = Cache.get('me', identity)
-        if cached_data:
-            return APIResponse.success(data=cached_data)
+        try:
+            cached_data = Cache.get('me', identity)
+            if cached_data:
+                return APIResponse.success(data=cached_data)
+        except Exception:
+            pass
 
         # Query user from database
-        user = UserModel.query.filter(UserModel.id == identity).first()
+        user = UserModel.query.get(identity)
         if type(user) is not UserModel:
             abort(404, 'User not found')
 

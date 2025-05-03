@@ -1,7 +1,8 @@
 import logging
 
 from flask import Blueprint
-from jwt.exceptions import PyJWTError
+from flask_jwt_extended.exceptions import NoAuthorizationError
+from jwt.exceptions import ExpiredSignatureError
 from marshmallow import ValidationError
 from werkzeug.exceptions import HTTPException, InternalServerError
 
@@ -23,22 +24,25 @@ bp.register_blueprint(things_to_do_bp)
 bp.register_blueprint(users_bp)
 
 
-@bp.errorhandler(PyJWTError)
-def unauthorized_handler(_: PyJWTError):
+def unauthorized_handler(e):
     return APIResponse.error(error='Unauthorized', status=401)
 
 
-@bp.errorhandler(ValidationError)
 def validation_error_handler(e: ValidationError):
     return APIResponse.error(error=e.messages, status=400)
 
 
-@bp.errorhandler(HTTPException)
 def http_exception_handler(e: HTTPException):
     return APIResponse.error(error=e.description, status=e.code)
 
 
-@bp.errorhandler(Exception)
 def generic_exception_handler(e: Exception):
     logger.exception(e)
     return APIResponse.error(error=InternalServerError.name, status=500)
+
+
+bp.register_error_handler(ExpiredSignatureError, unauthorized_handler)
+bp.register_error_handler(NoAuthorizationError, unauthorized_handler)
+bp.register_error_handler(ValidationError, validation_error_handler)
+bp.register_error_handler(HTTPException, http_exception_handler)
+bp.register_error_handler(Exception, generic_exception_handler)
