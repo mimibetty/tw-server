@@ -2,7 +2,7 @@ import logging
 
 from flask import Blueprint
 from flask_jwt_extended.exceptions import NoAuthorizationError
-from jwt.exceptions import ExpiredSignatureError
+from jwt.exceptions import ExpiredSignatureError, InvalidSignatureError
 from marshmallow import ValidationError
 from werkzeug.exceptions import HTTPException, InternalServerError
 
@@ -41,8 +41,9 @@ def generic_exception_handler(e: Exception):
     return APIResponse.error(error=InternalServerError.name, status=500)
 
 
-bp.register_error_handler(ExpiredSignatureError, unauthorized_handler)
 bp.register_error_handler(NoAuthorizationError, unauthorized_handler)
+bp.register_error_handler(InvalidSignatureError, unauthorized_handler)
+bp.register_error_handler(ExpiredSignatureError, unauthorized_handler)
 bp.register_error_handler(ValidationError, validation_error_handler)
 bp.register_error_handler(HTTPException, http_exception_handler)
 bp.register_error_handler(Exception, generic_exception_handler)
