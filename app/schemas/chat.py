@@ -4,7 +4,7 @@ from app.extensions import ma
 
 
 class CreateChatMessageSchema(ma.Schema):
-    conversation_id = fields.String(
+    id = fields.String(
         required=True,
         allow_none=True,
         error_messages={'required': 'Conversation ID is required.'},
@@ -16,6 +16,7 @@ class CreateChatMessageSchema(ma.Schema):
 
 class GetChatHistorySchema(ma.Schema):
     id = fields.String(dump_only=True)
+    created_at = fields.NaiveDateTime(dump_only=True)
 
 
 class ChatMessageSchema(ma.Schema):

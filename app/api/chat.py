@@ -24,10 +24,10 @@ def create_chat_message():
 
     # Save chat conversation if it doesn't exist
     if not UserConversationsModel.query.filter(
-        UserConversationsModel.id == inputs['conversation_id']
+        UserConversationsModel.id == inputs['id']
     ).first():
         new_conversation = UserConversationsModel(
-            conversation_id=inputs['conversation_id'], user_id=identity
+            conversation_id=inputs['id'], user_id=identity
         )
         new_conversation.add()
 
@@ -36,17 +36,13 @@ def create_chat_message():
 
     # Save user message to the database
     user_message = MessagesModel(
-        conversation_id=inputs['conversation_id'],
-        text=inputs['text'],
-        is_user=True,
+        conversation_id=inputs['id'], text=inputs['text'], is_user=True
     )
     user_message.add()
 
     # Save bot message to the database
     bot_message = MessagesModel(
-        conversation_id=inputs['conversation_id'],
-        text=chat_response,
-        is_user=False,
+        conversation_id=inputs['id'], text=chat_response, is_user=False
     )
     bot_message.add()
 
