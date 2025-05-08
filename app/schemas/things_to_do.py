@@ -33,3 +33,4 @@ class ThingToDoSchema(ma.Schema):
     photos = fields.List(fields.String())
     rating_histogram = fields.List(fields.Integer())
     new_rating_histogram = fields.List(fields.Integer())
+    travelerChoiceAward = fields.Boolean(default=False)

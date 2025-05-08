@@ -151,10 +151,15 @@ def bulk_insert_things_to_do_from_api():
                 rating_histogram.get('count5', 0),
             ]
             
-            # Process photos (limit to 10)
+            # Process photos (limit to 30)
             photos = loc.get('photos', [])
-            if len(photos) > 10:
-                photos = photos[:10]
+            if len(photos) > 30:
+                photos = photos[:30]
+            
+            # Convert travelerChoiceAward to boolean
+            traveler_choice = False
+            if loc.get('travelerChoiceAward'):
+                traveler_choice = True
                 
             # Prepare data according to schema
             schema_input = {
@@ -168,7 +173,8 @@ def bulk_insert_things_to_do_from_api():
                 "phone": loc.get('phone') or "",
                 "thumbnail": loc.get('image') or "",
                 "photos": photos,
-                "rating_histogram": rating_histogram_list
+                "rating_histogram": rating_histogram_list,
+                "travelerChoiceAward": traveler_choice
             }
             
             # Validate data against schema
@@ -195,7 +201,8 @@ def bulk_insert_things_to_do_from_api():
                     p.phone = $phone,
                     p.thumbnail = $thumbnail,
                     p.photos = $photos,
-                    p.rating_histogram = $rating_histogram
+                    p.rating_histogram = $rating_histogram,
+                    p.travelerChoiceAward = $travelerChoiceAward
                 ON MATCH SET
                     p.address = $address,
                     p.description = $description,
@@ -204,7 +211,8 @@ def bulk_insert_things_to_do_from_api():
                     p.phone = $phone,
                     p.thumbnail = $thumbnail,
                     p.photos = $photos,
-                    p.rating_histogram = $rating_histogram
+                    p.rating_histogram = $rating_histogram,
+                    p.travelerChoiceAward = $travelerChoiceAward
                 MERGE (c)-[:HAS_PLACE]->(p)
                 RETURN p
                 ''',
@@ -223,6 +231,7 @@ def bulk_insert_things_to_do_from_api():
                     'thumbnail': place_data.get('thumbnail'),
                     'photos': place_data.get('photos'),
                     'rating_histogram': place_data.get('rating_histogram', []),
+                    'travelerChoiceAward': place_data.get('travelerChoiceAward', False)
                 }
             )
             
