@@ -13,6 +13,8 @@ from .chat import bp as chat_bp
 from .cities import bp as cities_bp
 from .things_to_do import bp as things_to_do_bp
 from .users import bp as users_bp
+from .hotels import bp as hotels_bp
+from .restaurants import bp as restaurants_bp
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,8 @@ bp.register_blueprint(chat_bp)
 bp.register_blueprint(cities_bp)
 bp.register_blueprint(things_to_do_bp)
 bp.register_blueprint(users_bp)
+bp.register_blueprint(hotels_bp)
+bp.register_blueprint(restaurants_bp)
 
 
 def unauthorized_handler(e):
