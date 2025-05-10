@@ -17,7 +17,6 @@ bp = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
 #     return APIResponse.success(data=inputs, status=201)
 
 
-
 # in progress
 # @bp.post('')
 # def create_things_to_do():
@@ -100,13 +99,11 @@ bp = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
 #     return APIResponse.success(data={'id': place_id, **inputs}, status=201)
 
 
-
-
 @bp.post('/bulk')
 def bulk_insert_things_to_do_from_api():
     # print("bulk_insert_things_to_do_from_api" )
     # print(1000)
-    url = "https://api.apify.com/v2/datasets/Z2rig8cqAIhDAlJqZ/items?clean=true&fields=name,address,description,longitude,latitude,ratingHistogram,subtype,subcategories,rawRanking,phone,website,image,photos&format=json"
+    url = 'https://api.apify.com/v2/datasets/Z2rig8cqAIhDAlJqZ/items?clean=true&fields=name,address,description,longitude,latitude,ratingHistogram,subtype,subcategories,rawRanking,phone,website,image,photos&format=json'
     response = requests.get(url)
     data = response.json()
     if not data:
@@ -114,18 +111,20 @@ def bulk_insert_things_to_do_from_api():
 
     # Limit to 20 items for testing
     data = data[:20]
-    print(f"Fetched {len(data)} locations from API")
+    print(f'Fetched {len(data)} locations from API')
 
     # Find city node with postal code 550000
     city_result = execute_neo4j_query(
-        '''
+        """
         MATCH (c:City {postal_code: $postal_code})
         RETURN c
-        ''',
-        {'postal_code': '550000'}
+        """,
+        {'postal_code': '550000'},
     )
     if not city_result:
-        return APIResponse.error('City with postal code 550000 not found', status=404)
+        return APIResponse.error(
+            'City with postal code 550000 not found', status=404
+        )
 
     inserted = 0
     errors = []
@@ -135,10 +134,15 @@ def bulk_insert_things_to_do_from_api():
         try:
             # Process address - remove common suffixes
             address = loc.get('address', '')
-            suffixes = [", Da Nang 550000 Vietnam", ", Da Nang Vietnam", "Da Nang 550000 Vietnam", "Da Nang Vietnam"]
+            suffixes = [
+                ', Da Nang 550000 Vietnam',
+                ', Da Nang Vietnam',
+                'Da Nang 550000 Vietnam',
+                'Da Nang Vietnam',
+            ]
             for suffix in suffixes:
                 if address.endswith(suffix):
-                    address = address[:-len(suffix)].strip()
+                    address = address[: -len(suffix)].strip()
                     break
 
             # Process rating histogram
@@ -150,41 +154,41 @@ def bulk_insert_things_to_do_from_api():
                 rating_histogram.get('count4', 0),
                 rating_histogram.get('count5', 0),
             ]
-            
+
             # Process photos (limit to 30)
             photos = loc.get('photos', [])
             if len(photos) > 30:
                 photos = photos[:30]
-            
+
             # Convert travelerChoiceAward to boolean
             traveler_choice = False
             if loc.get('travelerChoiceAward'):
                 traveler_choice = True
-                
+
             # Prepare data according to schema
             schema_input = {
-                "name": loc.get('name', ''),
-                "address": address,
-                "description": loc.get('description') or "",
-                "longitude": loc.get('longitude'),
-                "latitude": loc.get('latitude'),
-                "rawRanking": loc.get('rawRanking'),
-                "web": loc.get('website') or "",
-                "phone": loc.get('phone') or "",
-                "thumbnail": loc.get('image') or "",
-                "photos": photos,
-                "rating_histogram": rating_histogram_list,
-                "travelerChoiceAward": traveler_choice
+                'name': loc.get('name', ''),
+                'address': address,
+                'description': loc.get('description') or '',
+                'longitude': loc.get('longitude'),
+                'latitude': loc.get('latitude'),
+                'rawRanking': loc.get('rawRanking'),
+                'web': loc.get('website') or '',
+                'phone': loc.get('phone') or '',
+                'thumbnail': loc.get('image') or '',
+                'photos': photos,
+                'rating_histogram': rating_histogram_list,
+                'travelerChoiceAward': traveler_choice,
             }
-            
+
             # Validate data against schema
             place_data = schema.load(schema_input)
             place_id = str(uuid.uuid4())
             created_at = datetime.now(timezone.utc).isoformat()
-            
+
             # Create the ThingToDo node and link directly to city
             execute_neo4j_query(
-                '''
+                """
                 MATCH (c:City {postal_code: $postal_code})
                 MERGE (p:ThingToDo {
                     name: $name,
@@ -215,7 +219,7 @@ def bulk_insert_things_to_do_from_api():
                     p.travelerChoiceAward = $travelerChoiceAward
                 MERGE (c)-[:HAS_PLACE]->(p)
                 RETURN p
-                ''',
+                """,
                 {
                     'postal_code': '550000',
                     'id': place_id,
@@ -231,51 +235,53 @@ def bulk_insert_things_to_do_from_api():
                     'thumbnail': place_data.get('thumbnail'),
                     'photos': place_data.get('photos'),
                     'rating_histogram': place_data.get('rating_histogram', []),
-                    'travelerChoiceAward': place_data.get('travelerChoiceAward', False)
-                }
+                    'travelerChoiceAward': place_data.get(
+                        'travelerChoiceAward', False
+                    ),
+                },
             )
-            
+
             # Create and link subtype nodes
             subtypes = loc.get('subtype', [])
             for subtype_name in subtypes:
                 execute_neo4j_query(
-                    '''
+                    """
                     MATCH (p:ThingToDo {name: $place_name, longitude: $longitude, latitude: $latitude})
                     MERGE (s:Subtype {name: $subtype_name})
                     MERGE (p)-[:HAS_SUBTYPE]->(s)
-                    ''',
+                    """,
                     {
                         'place_name': place_data.get('name'),
                         'longitude': place_data.get('longitude'),
                         'latitude': place_data.get('latitude'),
-                        'subtype_name': subtype_name
-                    }
+                        'subtype_name': subtype_name,
+                    },
                 )
-            
+
             # Create and link subcategory nodes
             subcategories = loc.get('subcategories', [])
             for subcategory_name in subcategories:
                 execute_neo4j_query(
-                    '''
+                    """
                     MATCH (p:ThingToDo {name: $place_name, longitude: $longitude, latitude: $latitude})
                     MERGE (s:Subcategory {name: $subcategory_name})
                     MERGE (p)-[:HAS_SUBCATEGORY]->(s)
-                    ''',
+                    """,
                     {
                         'place_name': place_data.get('name'),
                         'longitude': place_data.get('longitude'),
                         'latitude': place_data.get('latitude'),
-                        'subcategory_name': subcategory_name
-                    }
+                        'subcategory_name': subcategory_name,
+                    },
                 )
-            
+
             inserted += 1
         except Exception as e:
-            errors.append(f"{loc.get('name')}: {str(e)}")
+            errors.append(f'{loc.get("name")}: {str(e)}')
 
-    return APIResponse.success(data={'inserted': inserted, 'errors': errors}, status=200)
-
-
+    return APIResponse.success(
+        data={'inserted': inserted, 'errors': errors}, status=200
+    )
 
 
 @bp.get('')
@@ -309,29 +315,31 @@ def get_things_to_do():
     things = []
     for item in results:
         thing = schema.dump(item.get('p'))
-        
+
         # Ensure id field is included
         if 'id' not in thing and item.get('p').get('id'):
             thing['id'] = item.get('p').get('id')
-            
+
         # Add subtypes and subcategories
         thing['subtypes'] = item.get('subtypes', [])
         thing['subcategories'] = item.get('subcategories', [])
-        
+
         # Calculate overall rating and round to 1 decimal place
         rh = thing.get('rating_histogram')
         if rh and isinstance(rh, list) and len(rh) == 5:
             total = sum(rh)
             if total > 0:
                 overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-                overall_rating = round(overall_rating, 1)  # Round to 1 decimal place
+                overall_rating = round(
+                    overall_rating, 1
+                )  # Round to 1 decimal place
             else:
                 overall_rating = None
         else:
             overall_rating = None
         thing['overall_rating'] = overall_rating
         things.append(thing)
-    
+
     return APIResponse.paginate(
         data=things,
         page=page,
@@ -351,32 +359,34 @@ def get_thing_to_do_by_id(id):
         WITH p, collect(DISTINCT st.name) as subtypes, collect(DISTINCT sc.name) as subcategories
         RETURN p, subtypes, subcategories
         """,
-        {'id': id}
+        {'id': id},
     )
-    
+
     if not result:
         return APIResponse.error('Thing to do not found', status=404)
-    
+
     # Process the result
     schema = ThingToDoSchema()
     item = result[0]
     thing = schema.dump(item.get('p'))
-    
+
     # Add subtypes and subcategories
     thing['subtypes'] = item.get('subtypes', [])
     thing['subcategories'] = item.get('subcategories', [])
-    
+
     # Calculate overall rating and round to 1 decimal place
     rh = thing.get('rating_histogram')
     if rh and isinstance(rh, list) and len(rh) == 5:
         total = sum(rh)
         if total > 0:
             overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-            overall_rating = round(overall_rating, 1)  # Round to 1 decimal place
+            overall_rating = round(
+                overall_rating, 1
+            )  # Round to 1 decimal place
         else:
             overall_rating = None
     else:
         overall_rating = None
     thing['overall_rating'] = overall_rating
-    
+
     return APIResponse.success(data=thing)

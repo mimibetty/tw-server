@@ -13,7 +13,7 @@ def execute_neo4j_query(query: str, params: dict = None):
                 return result.data()
             return None
     except Exception as e:
-        raise Exception(f'Error executing Neo4j query: {e}')
+        raise e
     finally:
         driver.close()
 

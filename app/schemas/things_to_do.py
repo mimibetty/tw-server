@@ -3,22 +3,25 @@ from decimal import Decimal
 
 from app.extensions import ma
 
+
 class RoundedFloat(fields.Float):
     """Custom field that rounds float values to a specified number of decimal places"""
+
     def __init__(self, decimals=5, **kwargs):
         self.decimals = decimals
         super().__init__(**kwargs)
-    
+
     def _serialize(self, value, attr, obj, **kwargs):
         if value is None:
             return None
         return round(float(value), self.decimals)
-    
+
     def _deserialize(self, value, attr, data, **kwargs):
         value = super()._deserialize(value, attr, data, **kwargs)
         if value is None:
             return None
         return round(float(value), self.decimals)
+
 
 class ThingToDoSchema(ma.Schema):
     name = fields.String(required=True)

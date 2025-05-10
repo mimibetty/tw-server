@@ -65,23 +65,20 @@ def delete_city_children(postal_code):
     # Kiểm tra city tồn tại
     city_result = execute_neo4j_query(
         'MATCH (c:City {postal_code: $postal_code}) RETURN c',
-        {'postal_code': postal_code}
+        {'postal_code': postal_code},
     )
     if not city_result:
         return APIResponse.error('City not found', status=404)
-    
+
     execute_neo4j_query(
-        '''
+        """
         MATCH (c:City {postal_code: $postal_code})
         OPTIONAL MATCH (c)-[*]->(descendant)
         WHERE descendant IS NOT NULL
         DETACH DELETE descendant
-        ''',
-        {'postal_code': postal_code}
+        """,
+        {'postal_code': postal_code},
     )
-    return APIResponse.success(data={'message': 'All child nodes deleted for city'}, status=200)
-
-
-
-
-
+    return APIResponse.success(
+        data={'message': 'All child nodes deleted for city'}, status=200
+    )
