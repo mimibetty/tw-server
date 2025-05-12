@@ -429,13 +429,20 @@ def get_restaurants():
             print(f'Raw hours data: {hours_str}')
             restaurant['hours'] = {}
 
-        # Add relationship data
-        restaurant['cuisines'] = item.get('cuisines', [])
-        restaurant['mealTypes'] = item.get('meal_types', [])
-        restaurant['priceLevels'] = item.get('price_levels', [])
+        # Add relationship data (sorted alphabetically)
+        restaurant['cuisines'] = sorted(item.get('cuisines', []))
+        restaurant['mealTypes'] = sorted(item.get('meal_types', []))
+        restaurant['priceLevels'] = sorted(item.get('price_levels', []))
 
-        # Map amenities to features (for consistency with input data)
-        restaurant['features'] = item.get('amenities', [])
+        # Map amenities to features (for consistency with input data) and sort
+        restaurant['features'] = sorted(item.get('amenities', []))
+        
+        # Sort dishes and dietaryRestrictions if they exist
+        if 'dishes' in restaurant and restaurant['dishes']:
+            restaurant['dishes'] = sorted(restaurant['dishes'])
+            
+        if 'dietaryRestrictions' in restaurant and restaurant['dietaryRestrictions']:
+            restaurant['dietaryRestrictions'] = sorted(restaurant['dietaryRestrictions'])
         
         # Get street directly from the Neo4j node's address property
         street = r_node.get('address', '')
@@ -564,13 +571,20 @@ def get_restaurant_by_id(id):
         print(f'Error parsing hours for {restaurant.get("name")}: {str(e)}')
         restaurant['hours'] = {}
 
-    # Add relationship data
-    restaurant['cuisines'] = item.get('cuisines', [])
-    restaurant['mealTypes'] = item.get('meal_types', [])
-    restaurant['priceLevels'] = item.get('price_levels', [])
+    # Add relationship data (sorted alphabetically)
+    restaurant['cuisines'] = sorted(item.get('cuisines', []))
+    restaurant['mealTypes'] = sorted(item.get('meal_types', []))
+    restaurant['priceLevels'] = sorted(item.get('price_levels', []))
 
-    # Map amenities to features (for consistency with input data)
-    restaurant['features'] = item.get('amenities', [])
+    # Map amenities to features (for consistency with input data) and sort
+    restaurant['features'] = sorted(item.get('amenities', []))
+    
+    # Sort dishes and dietaryRestrictions if they exist
+    if 'dishes' in restaurant and restaurant['dishes']:
+        restaurant['dishes'] = sorted(restaurant['dishes'])
+        
+    if 'dietaryRestrictions' in restaurant and restaurant['dietaryRestrictions']:
+        restaurant['dietaryRestrictions'] = sorted(restaurant['dietaryRestrictions'])
     
     # Get street directly from the Neo4j node's address property
     street = r_node.get('address', '')

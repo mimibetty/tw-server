@@ -342,9 +342,11 @@ def get_hotels():
         if 'id' not in hotel and neo4j_node.get('id'):
             hotel['id'] = neo4j_node.get('id')
 
-        # Add amenities from the query results
-        if not hotel.get('amenities') and item.get('amenities'):
-            hotel['amenities'] = item.get('amenities')
+        # Add amenities from the query results and sort alphabetically
+        if item.get('amenities'):
+            hotel['amenities'] = sorted(item.get('amenities'))
+        else:
+            hotel['amenities'] = []
 
         # Add priceLevels
         hotel['priceLevels'] = item.get('price_levels', [])
@@ -431,9 +433,11 @@ def get_hotel_by_id(id):
     hotel = schema.dump(item.get('h'))
     neo4j_node = item.get('h', {})
 
-    # Add amenities from the query results
-    if not hotel.get('amenities') and item.get('amenities'):
-        hotel['amenities'] = item.get('amenities')
+    # Add amenities from the query results and sort alphabetically
+    if item.get('amenities'):
+        hotel['amenities'] = sorted(item.get('amenities'))
+    else:
+        hotel['amenities'] = []
 
     # Add priceLevels
     hotel['priceLevels'] = item.get('price_levels', [])
