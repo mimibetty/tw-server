@@ -79,31 +79,29 @@ def bulk_insert_restaurants():
             simplified_hours = None
             hours_data = loc.get('hours', {})
             if hours_data:
-                # Keep hours as a dictionary for schema validation
-                simplified_hours = {'weekRanges': []}
-                if 'weekRanges' in hours_data and isinstance(
-                    hours_data['weekRanges'], list
-                ):
-                    for day_ranges in hours_data.get('weekRanges', []):
-                        day_hours = []
-                        if isinstance(day_ranges, list):
-                            for time_range in day_ranges:
-                                if (
-                                    isinstance(time_range, dict)
-                                    and 'openHours' in time_range
-                                    and 'closeHours' in time_range
-                                ):
-                                    day_hours.append(
-                                        {
-                                            'openHours': time_range.get(
-                                                'openHours', ''
-                                            ),
-                                            'closeHours': time_range.get(
-                                                'closeHours', ''
-                                            ),
-                                        }
-                                    )
-                        simplified_hours['weekRanges'].append(day_hours)
+                # Create days-based hours structure
+                simplified_hours = {}
+                
+                # Set timezone if available
+                if 'timezone' in hours_data:
+                    simplified_hours['timezone'] = hours_data['timezone']
+                
+                # Process weekRanges if they exist
+                if 'weekRanges' in hours_data and isinstance(hours_data['weekRanges'], list):
+                    # Map index to day name
+                    day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                    week_ranges = hours_data['weekRanges']
+                    
+                    # Convert each day's hours
+                    for i, day_ranges in enumerate(week_ranges):
+                        if i < len(day_names) and day_ranges:
+                            # Take the first time slot for each day
+                            time_slot = day_ranges[0] if day_ranges else None
+                            if time_slot and 'openHours' in time_slot and 'closeHours' in time_slot:
+                                simplified_hours[day_names[i]] = {
+                                    'open': time_slot.get('openHours', ''),
+                                    'close': time_slot.get('closeHours', '')
+                                }
 
             # Prepare data for schema validation
             schema_input = {
@@ -473,6 +471,9 @@ def get_restaurants():
         else:
             restaurant['rating'] = None
             
+        # Explicitly add the type field
+        restaurant['type'] = "RESTAURANT"
+            
         # Remove priceLevel field since we have priceLevels
         if 'priceLevel' in restaurant:
             del restaurant['priceLevel']
@@ -614,6 +615,9 @@ def get_restaurant_by_id(id):
             restaurant['rating'] = None
     else:
         restaurant['rating'] = None
+
+    # Explicitly add the type field
+    restaurant['type'] = "RESTAURANT"
 
     # Remove priceLevel field since we have priceLevels
     if 'priceLevel' in restaurant:

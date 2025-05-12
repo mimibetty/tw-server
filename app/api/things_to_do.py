@@ -175,7 +175,7 @@ def bulk_insert_things_to_do_from_api():
                 'rawRanking': loc.get('rawRanking'),
                 'web': loc.get('website') or '',
                 'phone': loc.get('phone') or '',
-                'thumbnail': loc.get('image') or '',
+                'image': loc.get('image') or '',  # Use image field directly
                 'photos': photos,
                 'ratingHistogram': rating_histogram_list,
                 'travelerChoiceAward': traveler_choice,
@@ -207,7 +207,7 @@ def bulk_insert_things_to_do_from_api():
                     p.rawRanking = $rawRanking,
                     p.web = $web,
                     p.phone = $phone,
-                    p.thumbnail = $thumbnail,
+                    p.image = $image,
                     p.photos = $photos,
                     p.ratingHistogram = $ratingHistogram,
                     p.travelerChoiceAward = $travelerChoiceAward
@@ -217,7 +217,7 @@ def bulk_insert_things_to_do_from_api():
                     p.rawRanking = $rawRanking,
                     p.web = $web,
                     p.phone = $phone,
-                    p.thumbnail = $thumbnail,
+                    p.image = $image,
                     p.photos = $photos,
                     p.ratingHistogram = $ratingHistogram,
                     p.travelerChoiceAward = $travelerChoiceAward
@@ -236,7 +236,7 @@ def bulk_insert_things_to_do_from_api():
                     'rawRanking': place_data.get('rawRanking'),
                     'web': place_data.get('web'),
                     'phone': place_data.get('phone'),
-                    'thumbnail': place_data.get('thumbnail'),
+                    'image': place_data.get('image'),  # Use image instead of thumbnail
                     'photos': place_data.get('photos'),
                     'ratingHistogram': place_data.get('ratingHistogram', []),
                     'travelerChoiceAward': place_data.get(
@@ -357,6 +357,21 @@ def get_things_to_do():
         else:
             rating = None
         thing['rating'] = rating
+
+        # Handle thumbnail/image field for backward compatibility
+        if 'thumbnail' in neo4j_node and (not 'image' in thing or not thing['image']):
+            thing['image'] = neo4j_node.get('thumbnail')
+            
+        # If there's no image but there's a thumbnail in the result, use that
+        if not thing.get('image') and neo4j_node.get('thumbnail'):
+            thing['image'] = neo4j_node.get('thumbnail')
+            
+        # Remove the thumbnail field if it exists in the output
+        thing.pop('thumbnail', None)
+        
+        # Explicitly add the type field
+        thing['type'] = "THING-TO-DO"
+
         things.append(thing)
 
     return APIResponse.paginate(
@@ -422,5 +437,19 @@ def get_thing_to_do_by_id(id):
     else:
         rating = None
     thing['rating'] = rating
+
+    # Handle thumbnail/image field for backward compatibility
+    if 'thumbnail' in neo4j_node and (not 'image' in thing or not thing['image']):
+        thing['image'] = neo4j_node.get('thumbnail')
+        
+    # If there's no image but there's a thumbnail in the result, use that
+    if not thing.get('image') and neo4j_node.get('thumbnail'):
+        thing['image'] = neo4j_node.get('thumbnail')
+        
+    # Remove the thumbnail field if it exists in the output
+    thing.pop('thumbnail', None)
+    
+    # Explicitly add the type field
+    thing['type'] = "THING-TO-DO"
 
     return APIResponse.success(data=thing)

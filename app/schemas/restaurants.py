@@ -23,13 +23,19 @@ class RoundedFloat(fields.Float):
 
 
 class SimplifiedHourSchema(ma.Schema):
-    openHours = fields.String()
-    closeHours = fields.String()
+    open = fields.String()
+    close = fields.String()
 
 
 class HoursSchema(ma.Schema):
-    weekRanges = fields.List(fields.List(fields.Nested(SimplifiedHourSchema)))
-    timezone = fields.String()
+    monday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    tuesday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    wednesday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    thursday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    friday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    saturday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    sunday = fields.Nested(SimplifiedHourSchema, allow_none=True)
+    timezone = fields.String(allow_none=True)
 
 
 class CitySchema(ma.Schema):
@@ -78,6 +84,9 @@ class RestaurantSchema(ma.Schema):
 
     # Nested data
     hours = fields.Nested(HoursSchema, allow_none=True)
+
+    # Place type identifier
+    type = fields.String(dump_only=True, default="RESTAURANT")
 
     # Ratings and awards
     ratingHistogram = fields.List(fields.Integer(), default=list)
@@ -145,22 +154,32 @@ class RestaurantSchema(ma.Schema):
                 }
             }
 
-        # Process hours to only include openHours and closeHours
+        # Process hours from weekRanges format to day-based format
         if 'hours' in data and data['hours'] and 'weekRanges' in data['hours']:
             weekRanges = data['hours']['weekRanges']
-            simplified_weekRanges = []
-
-            for day_ranges in weekRanges:
-                simplified_day_ranges = []
-                for time_range in day_ranges:
-                    simplified_time_range = {
-                        'openHours': time_range.get('openHours', ''),
-                        'closeHours': time_range.get('closeHours', ''),
-                    }
-                    simplified_day_ranges.append(simplified_time_range)
-                simplified_weekRanges.append(simplified_day_ranges)
-
-            data['hours']['weekRanges'] = simplified_weekRanges
+            timezone = data['hours'].get('timezone')
+            
+            # Create new hours structure
+            new_hours = {
+                'timezone': timezone
+            }
+            
+            # Map index to day name
+            day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            
+            # Convert each day's hours
+            for i, day_ranges in enumerate(weekRanges):
+                if i < len(day_names) and day_ranges:
+                    # Take the first time slot for each day (most restaurants have just one slot per day)
+                    time_slot = day_ranges[0] if day_ranges else None
+                    if time_slot:
+                        new_hours[day_names[i]] = {
+                            'open': time_slot.get('openHours', ''),
+                            'close': time_slot.get('closeHours', '')
+                        }
+            
+            # Replace the old hours structure with our new one
+            data['hours'] = new_hours
 
         # Convert travelerChoiceAward to boolean
         if 'travelerChoiceAward' in data:

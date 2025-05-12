@@ -66,6 +66,9 @@ class HotelSchema(ma.Schema):
     # Relationship fields (stored as separate nodes)
     amenities = fields.List(fields.String(), allow_none=True, default=list)
 
+    # Place type identifier
+    type = fields.String(dump_only=True, default="HOTEL")
+
     # These fields will be added by the GET API from relationship data
     priceLevels = fields.List(
         fields.String(), load_only=False, dump_only=True

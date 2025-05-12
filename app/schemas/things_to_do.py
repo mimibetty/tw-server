@@ -42,15 +42,22 @@ class ThingToDoSchema(ma.Schema):
     rawRanking = RoundedFloat(required=True, decimals=5)
     web = fields.String(allow_none=True)
     phone = fields.String(allow_none=True)
-    thumbnail = fields.String(allow_none=True)
+    image = fields.String(allow_none=True)
     photos = fields.List(fields.String())
     ratingHistogram = fields.List(fields.Integer())
     newRatingHistogram = fields.List(fields.Integer())
     travelerChoiceAward = fields.Boolean(default=False)
     
+    # Place type identifier
+    type = fields.String(dump_only=True, default="THING-TO-DO")
+    
     @pre_load
     def process_input(self, data, **kwargs):
         """Pre-process input data before validation"""
+        # Handle for backward compatibility - map thumbnail to image
+        if 'thumbnail' in data and 'image' not in data:
+            data['image'] = data.pop('thumbnail')
+        
         # Handle rating histogram conversion if needed
         if 'ratingHistogram' in data:
             if isinstance(data['ratingHistogram'], dict):

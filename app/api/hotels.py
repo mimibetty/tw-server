@@ -395,6 +395,9 @@ def get_hotels():
             rating = None
         hotel['rating'] = rating
         
+        # Explicitly add the type field
+        hotel['type'] = "HOTEL"
+        
         # Remove snake_case fields that have camelCase equivalents
         hotel.pop('price_levels', None)
         hotel.pop('hotel_classes', None)
@@ -485,6 +488,9 @@ def get_hotel_by_id(id):
     else:
         rating = None
     hotel['rating'] = rating
+    
+    # Explicitly add the type field
+    hotel['type'] = "HOTEL"
     
     # Remove snake_case fields that have camelCase equivalents
     hotel.pop('price_levels', None)
