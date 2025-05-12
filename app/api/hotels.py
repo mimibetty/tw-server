@@ -53,8 +53,8 @@ def bulk_insert_hotels():
         return APIResponse.error('No data from API', status=400)
 
     # Limit to 20 items for testing
-    data = data[:20]
-    print(f'Fetched {len(data)} hotels from API')
+    # data = data[:20]
+    # print(f'Fetched {len(data)} hotels from API')
 
     # Find city node with postal code 550000
     city_result = execute_neo4j_query(
