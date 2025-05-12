@@ -12,25 +12,27 @@ bp = Blueprint('hotels', __name__, url_prefix='/hotels')
 @bp.post('')
 def create_hotel():
     data = request.json.copy()
-    # Convert ratingHistogram to rating_histogram (list of int)
-    if 'ratingHistogram' in data:
+    
+    # Process rating histogram - convert from object to list format
+    if 'ratingHistogram' in data and isinstance(data['ratingHistogram'], dict):
         rh = data['ratingHistogram']
-        data['rating_histogram'] = [
+        data['ratingHistogram'] = [
             rh.get('count1', 0),
             rh.get('count2', 0),
             rh.get('count3', 0),
             rh.get('count4', 0),
             rh.get('count5', 0),
         ]
-        del data['ratingHistogram']
-    # Clean up address field: remove ', Da Nang 550000 Vietnam' if present
-    if 'address' in data and isinstance(data['address'], str):
-        suffix = ', Da Nang 550000 Vietnam'
-        if data['address'].endswith(suffix):
-            data['address'] = data['address'][: -len(suffix)].rstrip(', ')
+    
+    # For backwards compatibility
+    if 'rating_histogram' in data and 'ratingHistogram' not in data:
+        data['ratingHistogram'] = data.pop('rating_histogram')
+        
+    # Clean up address field: it will be processed in the schema's pre_load method
     # Remove fields not in schema
     for field in ['rating', 'numberOfReviews', 'addressObj']:
         data.pop(field, None)
+        
     schema = HotelSchema()
     inputs = schema.load(data)
     return APIResponse.success(data=inputs, status=201)
@@ -76,12 +78,31 @@ def bulk_insert_hotels():
             # Process photos (limit to 30)
             if 'photos' in loc and len(loc['photos']) > 30:
                 loc['photos'] = loc['photos'][:30]
+                
+            # Process rating histogram - convert from object to list format
+            if 'ratingHistogram' in loc and isinstance(loc['ratingHistogram'], dict):
+                rh = loc['ratingHistogram']
+                loc['ratingHistogram'] = [
+                    rh.get('count1', 0),
+                    rh.get('count2', 0),
+                    rh.get('count3', 0),
+                    rh.get('count4', 0),
+                    rh.get('count5', 0),
+                ]
+            
+            # For backwards compatibility
+            if 'rating_histogram' in loc and 'ratingHistogram' not in loc:
+                loc['ratingHistogram'] = loc.pop('rating_histogram')
 
             # Validate with schema (pre_load processing will handle conversions)
             hotel_data = schema.load(loc)
             hotel_id = str(uuid.uuid4())
             created_at = datetime.now(timezone.utc).isoformat()
 
+            # Extract address components
+            address_data = hotel_data.get('address', {})
+            street = address_data.get('street', '')
+            
             # Create the hotel node and link directly to city
             hotel_create_result = execute_neo4j_query(
                 """
@@ -105,7 +126,7 @@ def bulk_insert_hotels():
                     h.phone = $phone,
                     h.website = $website,
                     h.photos = $photos,
-                    h.rating_histogram = $rating_histogram,
+                    h.ratingHistogram = $ratingHistogram,
                     h.travelerChoiceAward = $travelerChoiceAward
                 ON MATCH SET
                     h.address = $address,
@@ -119,7 +140,7 @@ def bulk_insert_hotels():
                     h.phone = $phone,
                     h.website = $website,
                     h.photos = $photos,
-                    h.rating_histogram = $rating_histogram,
+                    h.ratingHistogram = $ratingHistogram,
                     h.travelerChoiceAward = $travelerChoiceAward
                 MERGE (c)-[:HAS_PLACE]->(h)
                 RETURN h
@@ -129,7 +150,7 @@ def bulk_insert_hotels():
                     'id': hotel_id,
                     'created_at': created_at,
                     'name': hotel_data.get('name'),
-                    'address': hotel_data.get('address'),
+                    'address': street,  # Store only the street part in Neo4j
                     'description': hotel_data.get('description'),
                     'longitude': hotel_data.get('longitude'),
                     'latitude': hotel_data.get('latitude'),
@@ -142,7 +163,7 @@ def bulk_insert_hotels():
                     'phone': hotel_data.get('phone'),
                     'website': hotel_data.get('website'),
                     'photos': hotel_data.get('photos'),
-                    'rating_histogram': hotel_data.get('rating_histogram'),
+                    'ratingHistogram': hotel_data.get('ratingHistogram'),
                     'travelerChoiceAward': hotel_data.get(
                         'travelerChoiceAward'
                     ),
@@ -312,41 +333,65 @@ def get_hotels():
     # Process the results
     schema = HotelSchema()
     hotels = []
+    
     for item in results:
         hotel = schema.dump(item.get('h'))
+        neo4j_node = item.get('h', {})
 
         # Ensure id field is included
-        if 'id' not in hotel and item.get('h').get('id'):
-            hotel['id'] = item.get('h').get('id')
+        if 'id' not in hotel and neo4j_node.get('id'):
+            hotel['id'] = neo4j_node.get('id')
 
         # Add amenities from the query results
         if not hotel.get('amenities') and item.get('amenities'):
             hotel['amenities'] = item.get('amenities')
 
-        # Add price_levels
-        hotel['price_levels'] = item.get('price_levels', [])
+        # Add priceLevels
+        hotel['priceLevels'] = item.get('price_levels', [])
 
-        # Add hotel_classes and convert "0.0" to "undefined"
+        # Add hotelClasses and convert "0.0" to "undefined"
         hotel_classes = item.get('hotel_classes', [])
-        hotel['hotel_classes'] = [
+        hotel['hotelClasses'] = [
             'undefined' if str(cls) == '0.0' else str(cls)
             for cls in hotel_classes
         ]
+        
+        # Get street directly from the Neo4j node's address property
+        street = neo4j_node.get('address', '')
+        
+        # Set structured address with the retrieved street
+        hotel['address'] = {
+            'street': street if street else '',
+            'city': {
+                'name': 'Da Nang',
+                'postalCode': '550000'
+            }
+        }
 
-        # Calculate overall rating and round to 1 decimal place
-        rh = hotel.get('rating_histogram')
+        # Calculate rating and round to 1 decimal place
+        rh = hotel.get('ratingHistogram')
+        if not rh and 'rating_histogram' in hotel:
+            # For backward compatibility
+            rh = hotel.get('rating_histogram')
+            # Migrate the field name
+            hotel['ratingHistogram'] = rh
+            hotel.pop('rating_histogram', None)
+            
         if rh and isinstance(rh, list) and len(rh) == 5:
             total = sum(rh)
             if total > 0:
-                overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-                overall_rating = round(
-                    overall_rating, 1
-                )  # Round to 1 decimal place
+                rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                rating = round(rating, 1)  # Round to 1 decimal place
             else:
-                overall_rating = None
+                rating = None
         else:
-            overall_rating = None
-        hotel['overall_rating'] = overall_rating
+            rating = None
+        hotel['rating'] = rating
+        
+        # Remove snake_case fields that have camelCase equivalents
+        hotel.pop('price_levels', None)
+        hotel.pop('hotel_classes', None)
+        
         hotels.append(hotel)
 
     return APIResponse.paginate(
@@ -379,33 +424,55 @@ def get_hotel_by_id(id):
     schema = HotelSchema()
     item = result[0]
     hotel = schema.dump(item.get('h'))
+    neo4j_node = item.get('h', {})
 
     # Add amenities from the query results
     if not hotel.get('amenities') and item.get('amenities'):
         hotel['amenities'] = item.get('amenities')
 
-    # Add price_levels
-    hotel['price_levels'] = item.get('price_levels', [])
+    # Add priceLevels
+    hotel['priceLevels'] = item.get('price_levels', [])
 
-    # Add hotel_classes and convert "0.0" to "undefined"
+    # Add hotelClasses and convert "0.0" to "undefined"
     hotel_classes = item.get('hotel_classes', [])
-    hotel['hotel_classes'] = [
+    hotel['hotelClasses'] = [
         'undefined' if str(cls) == '0.0' else str(cls) for cls in hotel_classes
     ]
+    
+    # Get street directly from the Neo4j node's address property
+    street = neo4j_node.get('address', '')
+    
+    # Set structured address with the retrieved street
+    hotel['address'] = {
+        'street': street if street else '',
+        'city': {
+            'name': 'Da Nang',
+            'postalCode': '550000'
+        }
+    }
 
-    # Calculate overall rating and round to 1 decimal place
-    rh = hotel.get('rating_histogram')
+    # Calculate rating and round to 1 decimal place
+    rh = hotel.get('ratingHistogram')
+    if not rh and 'rating_histogram' in hotel:
+        # For backward compatibility
+        rh = hotel.get('rating_histogram')
+        # Migrate the field name
+        hotel['ratingHistogram'] = rh
+        hotel.pop('rating_histogram', None)
+        
     if rh and isinstance(rh, list) and len(rh) == 5:
         total = sum(rh)
         if total > 0:
-            overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-            overall_rating = round(
-                overall_rating, 1
-            )  # Round to 1 decimal place
+            rating = sum((i + 1) * rh[i] for i in range(5)) / total
+            rating = round(rating, 1)  # Round to 1 decimal place
         else:
-            overall_rating = None
+            rating = None
     else:
-        overall_rating = None
-    hotel['overall_rating'] = overall_rating
+        rating = None
+    hotel['rating'] = rating
+    
+    # Remove snake_case fields that have camelCase equivalents
+    hotel.pop('price_levels', None)
+    hotel.pop('hotel_classes', None)
 
     return APIResponse.success(data=hotel)

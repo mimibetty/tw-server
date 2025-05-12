@@ -12,8 +12,24 @@ bp = Blueprint('restaurants', __name__, url_prefix='/restaurants')
 
 @bp.post('')
 def create_restaurant():
+    # Process the rating histogram if present to ensure valid format
+    data = request.json.copy()
+    if 'ratingHistogram' in data and isinstance(data['ratingHistogram'], dict):
+        rh = data['ratingHistogram']
+        data['ratingHistogram'] = [
+            rh.get('count1', 0),
+            rh.get('count2', 0),
+            rh.get('count3', 0),
+            rh.get('count4', 0),
+            rh.get('count5', 0),
+        ]
+    
+    # For backward compatibility with rating_histogram
+    if 'rating_histogram' in data and 'ratingHistogram' not in data:
+        data['ratingHistogram'] = data.pop('rating_histogram')
+        
     schema = RestaurantSchema()
-    inputs = schema.load(request.json)
+    inputs = schema.load(data)
     return APIResponse.success(data=inputs, status=201)
 
 
@@ -128,6 +144,10 @@ def bulk_insert_restaurants():
                 if restaurant_data.get('hours')
                 else '{}'
             )
+            
+            # Extract address components
+            address_data = restaurant_data.get('address', {})
+            street = address_data.get('street', '')
 
             # Create the Restaurant node and link directly to city
             execute_neo4j_query(
@@ -153,7 +173,7 @@ def bulk_insert_restaurants():
                     r.image = $image,
                     r.photos = $photos,
                     r.hours = $hours,
-                    r.rating_histogram = $rating_histogram,
+                    r.ratingHistogram = $ratingHistogram,
                     r.travelerChoiceAward = $travelerChoiceAward
                 ON MATCH SET
                     r.address = $address,
@@ -168,7 +188,7 @@ def bulk_insert_restaurants():
                     r.image = $image,
                     r.photos = $photos,
                     r.hours = $hours,
-                    r.rating_histogram = $rating_histogram,
+                    r.ratingHistogram = $ratingHistogram,
                     r.travelerChoiceAward = $travelerChoiceAward
                 MERGE (c)-[:HAS_PLACE]->(r)
                 RETURN r
@@ -178,7 +198,7 @@ def bulk_insert_restaurants():
                     'id': restaurant_id,
                     'created_at': created_at,
                     'name': restaurant_data.get('name'),
-                    'address': restaurant_data.get('address'),
+                    'address': street,  # Store only the street part in Neo4j
                     'description': restaurant_data.get('description'),
                     'phone': restaurant_data.get('phone'),
                     'longitude': restaurant_data.get('longitude'),
@@ -194,8 +214,8 @@ def bulk_insert_restaurants():
                     'image': restaurant_data.get('image'),
                     'photos': restaurant_data.get('photos'),
                     'hours': hours_json,
-                    'rating_histogram': restaurant_data.get(
-                        'rating_histogram', []
+                    'ratingHistogram': restaurant_data.get(
+                        'ratingHistogram', []
                     ),
                     'travelerChoiceAward': restaurant_data.get(
                         'travelerChoiceAward', False
@@ -412,25 +432,41 @@ def get_restaurants():
         # Add relationship data
         restaurant['cuisines'] = item.get('cuisines', [])
         restaurant['mealTypes'] = item.get('meal_types', [])
-        restaurant['price_levels'] = item.get('price_levels', [])
+        restaurant['priceLevels'] = item.get('price_levels', [])
 
         # Map amenities to features (for consistency with input data)
         restaurant['features'] = item.get('amenities', [])
+        
+        # Get street directly from the Neo4j node's address property
+        street = r_node.get('address', '')
+        
+        # Set structured address with the retrieved street
+        restaurant['address'] = {
+            'street': street if street else '',
+            'city': {
+                'name': 'Da Nang',
+                'postalCode': '550000'
+            }
+        }
 
-        # Calculate overall rating and round to 1 decimal place
-        rh = restaurant.get('rating_histogram')
+        # Calculate rating and round to 1 decimal place
+        rh = r_node.get('ratingHistogram', [])
+        if not rh and 'rating_histogram' in r_node:
+            # For backward compatibility
+            rh = r_node.get('rating_histogram', [])
+            
         if rh and isinstance(rh, list) and len(rh) == 5:
             total = sum(rh)
             if total > 0:
-                overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-                overall_rating = round(overall_rating, 1)
-                restaurant['overall_rating'] = overall_rating
+                rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                rating = round(rating, 1)
+                restaurant['rating'] = rating
             else:
-                restaurant['overall_rating'] = None
+                restaurant['rating'] = None
         else:
-            restaurant['overall_rating'] = None
-
-        # Remove priceLevel field since we have price_levels
+            restaurant['rating'] = None
+            
+        # Remove priceLevel field since we have priceLevels
         if 'priceLevel' in restaurant:
             del restaurant['priceLevel']
 
@@ -531,25 +567,41 @@ def get_restaurant_by_id(id):
     # Add relationship data
     restaurant['cuisines'] = item.get('cuisines', [])
     restaurant['mealTypes'] = item.get('meal_types', [])
-    restaurant['price_levels'] = item.get('price_levels', [])
+    restaurant['priceLevels'] = item.get('price_levels', [])
 
     # Map amenities to features (for consistency with input data)
     restaurant['features'] = item.get('amenities', [])
+    
+    # Get street directly from the Neo4j node's address property
+    street = r_node.get('address', '')
+    
+    # Set structured address with the retrieved street
+    restaurant['address'] = {
+        'street': street if street else '',
+        'city': {
+            'name': 'Da Nang',
+            'postalCode': '550000'
+        }
+    }
 
-    # Calculate overall rating and round to 1 decimal place
-    rh = restaurant.get('rating_histogram')
+    # Calculate rating and round to 1 decimal place
+    rh = r_node.get('ratingHistogram', [])
+    if not rh and 'rating_histogram' in r_node:
+        # For backward compatibility
+        rh = r_node.get('rating_histogram', [])
+        
     if rh and isinstance(rh, list) and len(rh) == 5:
         total = sum(rh)
         if total > 0:
-            overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-            overall_rating = round(overall_rating, 1)
-            restaurant['overall_rating'] = overall_rating
+            rating = sum((i + 1) * rh[i] for i in range(5)) / total
+            rating = round(rating, 1)
+            restaurant['rating'] = rating
         else:
-            restaurant['overall_rating'] = None
+            restaurant['rating'] = None
     else:
-        restaurant['overall_rating'] = None
+        restaurant['rating'] = None
 
-    # Remove priceLevel field since we have price_levels
+    # Remove priceLevel field since we have priceLevels
     if 'priceLevel' in restaurant:
         del restaurant['priceLevel']
 

@@ -32,6 +32,18 @@ class HoursSchema(ma.Schema):
     timezone = fields.String()
 
 
+class CitySchema(ma.Schema):
+    """Schema for city information"""
+    name = fields.String()
+    postalCode = fields.String()
+
+
+class AddressSchema(ma.Schema):
+    """Schema for structured address"""
+    street = fields.String()
+    city = fields.Nested(CitySchema)
+
+
 class RestaurantSchema(ma.Schema):
     # Core required fields
     name = fields.String(required=True)
@@ -41,7 +53,7 @@ class RestaurantSchema(ma.Schema):
     # Basic information
     description = fields.String(allow_none=True, default='')
     phone = fields.String(allow_none=True, default='')
-    address = fields.String(allow_none=True, default='')
+    address = fields.Nested(AddressSchema, allow_none=True)
     email = fields.String(allow_none=True, default='')
 
     # Web details
@@ -68,42 +80,70 @@ class RestaurantSchema(ma.Schema):
     hours = fields.Nested(HoursSchema, allow_none=True)
 
     # Ratings and awards
-    rating_histogram = fields.List(fields.Integer(), default=list)
-    new_rating_histogram = fields.List(fields.Integer(), allow_none=True)
+    ratingHistogram = fields.List(fields.Integer(), default=list)
+    newRatingHistogram = fields.List(fields.Integer(), allow_none=True)
     rawRanking = RoundedFloat(decimals=5, allow_none=True)
     travelerChoiceAward = fields.Boolean(default=False)
 
     # These fields will be added by the GET API from relationship data
-    price_levels = fields.List(fields.String(), dump_only=True)
+    priceLevels = fields.List(fields.String(), dump_only=True)
     amenities = fields.List(fields.String(), dump_only=True)
 
     @pre_load
     def process_input(self, data, **kwargs):
         """Pre-process input data before validation"""
         # Handle rating histogram conversion if needed
-        if 'ratingHistogram' in data and 'rating_histogram' not in data:
-            rh = data.pop('ratingHistogram', {})
-            data['rating_histogram'] = [
-                rh.get('count1', 0),
-                rh.get('count2', 0),
-                rh.get('count3', 0),
-                rh.get('count4', 0),
-                rh.get('count5', 0),
-            ]
+        if 'ratingHistogram' in data:
+            if isinstance(data['ratingHistogram'], dict):
+                # If it's a dictionary format like {count1: 10, count2: 20, ...}
+                rh = data['ratingHistogram']
+                data['ratingHistogram'] = [
+                    rh.get('count1', 0),
+                    rh.get('count2', 0),
+                    rh.get('count3', 0),
+                    rh.get('count4', 0),
+                    rh.get('count5', 0),
+                ]
+            elif not isinstance(data['ratingHistogram'], list):
+                # If it's not a list or dict, set to empty list
+                data['ratingHistogram'] = []
+        
+        # For backward compatibility with rating_histogram
+        if 'rating_histogram' in data and 'ratingHistogram' not in data:
+            if isinstance(data['rating_histogram'], list):
+                data['ratingHistogram'] = data.pop('rating_histogram')
+            else:
+                # If rating_histogram is not a list, initialize empty list
+                data.pop('rating_histogram')
+                data['ratingHistogram'] = []
 
-        # Handle address cleaning
+        # Handle address conversion to structured format
         if 'address' in data and isinstance(data['address'], str):
+            street = data['address']
+            # Extract city information
+            city_name = "Da Nang"
+            postal_code = "550000"
+            
+            # Clean up the address by removing city/postal code suffixes
             suffixes = [
-                ', Da Nang 550000 Vietnam',
-                ', Da Nang Vietnam',
-                'Da Nang 550000 Vietnam',
-                'Da Nang Vietnam',
+                f', {city_name} {postal_code} Vietnam',
+                f', {city_name} Vietnam',
+                f'{city_name} {postal_code} Vietnam',
+                f'{city_name} Vietnam',
             ]
-            address = data['address']
             for suffix in suffixes:
-                if address.endswith(suffix):
-                    data['address'] = address[: -len(suffix)].strip()
+                if street.endswith(suffix):
+                    street = street[: -len(suffix)].strip()
                     break
+
+            # Create structured address
+            data['address'] = {
+                'street': street,
+                'city': {
+                    'name': city_name,
+                    'postalCode': postal_code
+                }
+            }
 
         # Process hours to only include openHours and closeHours
         if 'hours' in data and data['hours'] and 'weekRanges' in data['hours']:
@@ -125,12 +165,5 @@ class RestaurantSchema(ma.Schema):
         # Convert travelerChoiceAward to boolean
         if 'travelerChoiceAward' in data:
             data['travelerChoiceAward'] = bool(data['travelerChoiceAward'])
-
-        # Convert rawRanking to float if needed
-        if 'rawRanking' in data and data['rawRanking'] is not None:
-            try:
-                data['rawRanking'] = float(data['rawRanking'])
-            except (ValueError, TypeError):
-                data['rawRanking'] = None
 
         return data

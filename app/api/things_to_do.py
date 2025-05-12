@@ -177,7 +177,7 @@ def bulk_insert_things_to_do_from_api():
                 'phone': loc.get('phone') or '',
                 'thumbnail': loc.get('image') or '',
                 'photos': photos,
-                'rating_histogram': rating_histogram_list,
+                'ratingHistogram': rating_histogram_list,
                 'travelerChoiceAward': traveler_choice,
             }
 
@@ -185,6 +185,10 @@ def bulk_insert_things_to_do_from_api():
             place_data = schema.load(schema_input)
             place_id = str(uuid.uuid4())
             created_at = datetime.now(timezone.utc).isoformat()
+
+            # Extract address components
+            address_data = place_data.get('address', {})
+            street = address_data.get('street', '')
 
             # Create the ThingToDo node and link directly to city
             execute_neo4j_query(
@@ -205,7 +209,7 @@ def bulk_insert_things_to_do_from_api():
                     p.phone = $phone,
                     p.thumbnail = $thumbnail,
                     p.photos = $photos,
-                    p.rating_histogram = $rating_histogram,
+                    p.ratingHistogram = $ratingHistogram,
                     p.travelerChoiceAward = $travelerChoiceAward
                 ON MATCH SET
                     p.address = $address,
@@ -215,7 +219,7 @@ def bulk_insert_things_to_do_from_api():
                     p.phone = $phone,
                     p.thumbnail = $thumbnail,
                     p.photos = $photos,
-                    p.rating_histogram = $rating_histogram,
+                    p.ratingHistogram = $ratingHistogram,
                     p.travelerChoiceAward = $travelerChoiceAward
                 MERGE (c)-[:HAS_PLACE]->(p)
                 RETURN p
@@ -225,7 +229,7 @@ def bulk_insert_things_to_do_from_api():
                     'id': place_id,
                     'created_at': created_at,
                     'name': place_data.get('name'),
-                    'address': place_data.get('address'),
+                    'address': street,  # Store only the street part in Neo4j
                     'description': place_data.get('description'),
                     'longitude': place_data.get('longitude'),
                     'latitude': place_data.get('latitude'),
@@ -234,7 +238,7 @@ def bulk_insert_things_to_do_from_api():
                     'phone': place_data.get('phone'),
                     'thumbnail': place_data.get('thumbnail'),
                     'photos': place_data.get('photos'),
-                    'rating_histogram': place_data.get('rating_histogram', []),
+                    'ratingHistogram': place_data.get('ratingHistogram', []),
                     'travelerChoiceAward': place_data.get(
                         'travelerChoiceAward', False
                     ),
@@ -315,29 +319,44 @@ def get_things_to_do():
     things = []
     for item in results:
         thing = schema.dump(item.get('p'))
+        neo4j_node = item.get('p', {})
 
         # Ensure id field is included
-        if 'id' not in thing and item.get('p').get('id'):
-            thing['id'] = item.get('p').get('id')
+        if 'id' not in thing and neo4j_node.get('id'):
+            thing['id'] = neo4j_node.get('id')
 
         # Add subtypes and subcategories
         thing['subtypes'] = item.get('subtypes', [])
         thing['subcategories'] = item.get('subcategories', [])
 
-        # Calculate overall rating and round to 1 decimal place
-        rh = thing.get('rating_histogram')
+        # Get street directly from the Neo4j node's address property
+        street = neo4j_node.get('address', '')
+        
+        # Set structured address with the retrieved street
+        thing['address'] = {
+            'street': street if street else '',
+            'city': {
+                'name': 'Da Nang',
+                'postalCode': '550000'
+            }
+        }
+
+        # Calculate rating and round to 1 decimal place
+        rh = neo4j_node.get('ratingHistogram', [])
+        if not rh and 'rating_histogram' in neo4j_node:
+            # For backward compatibility
+            rh = neo4j_node.get('rating_histogram', [])
+            
         if rh and isinstance(rh, list) and len(rh) == 5:
             total = sum(rh)
             if total > 0:
-                overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-                overall_rating = round(
-                    overall_rating, 1
-                )  # Round to 1 decimal place
+                rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                rating = round(rating, 1)  # Round to 1 decimal place
             else:
-                overall_rating = None
+                rating = None
         else:
-            overall_rating = None
-        thing['overall_rating'] = overall_rating
+            rating = None
+        thing['rating'] = rating
         things.append(thing)
 
     return APIResponse.paginate(
@@ -369,24 +388,39 @@ def get_thing_to_do_by_id(id):
     schema = ThingToDoSchema()
     item = result[0]
     thing = schema.dump(item.get('p'))
+    neo4j_node = item.get('p', {})
 
     # Add subtypes and subcategories
     thing['subtypes'] = item.get('subtypes', [])
     thing['subcategories'] = item.get('subcategories', [])
 
-    # Calculate overall rating and round to 1 decimal place
-    rh = thing.get('rating_histogram')
+    # Get street directly from the Neo4j node's address property
+    street = neo4j_node.get('address', '')
+    
+    # Set structured address with the retrieved street
+    thing['address'] = {
+        'street': street if street else '',
+        'city': {
+            'name': 'Da Nang',
+            'postalCode': '550000'
+        }
+    }
+
+    # Calculate rating and round to 1 decimal place
+    rh = neo4j_node.get('ratingHistogram', [])
+    if not rh and 'rating_histogram' in neo4j_node:
+        # For backward compatibility
+        rh = neo4j_node.get('rating_histogram', [])
+        
     if rh and isinstance(rh, list) and len(rh) == 5:
         total = sum(rh)
         if total > 0:
-            overall_rating = sum((i + 1) * rh[i] for i in range(5)) / total
-            overall_rating = round(
-                overall_rating, 1
-            )  # Round to 1 decimal place
+            rating = sum((i + 1) * rh[i] for i in range(5)) / total
+            rating = round(rating, 1)  # Round to 1 decimal place
         else:
-            overall_rating = None
+            rating = None
     else:
-        overall_rating = None
-    thing['overall_rating'] = overall_rating
+        rating = None
+    thing['rating'] = rating
 
     return APIResponse.success(data=thing)

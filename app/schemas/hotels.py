@@ -21,6 +21,18 @@ class RoundedFloat(fields.Float):
         return round(float(value), self.decimals)
 
 
+class CitySchema(ma.Schema):
+    """Schema for city information"""
+    name = fields.String()
+    postalCode = fields.String()
+
+
+class AddressSchema(ma.Schema):
+    """Schema for structured address"""
+    street = fields.String()
+    city = fields.Nested(CitySchema)
+
+
 class HotelSchema(ma.Schema):
     # Core required fields
     name = fields.String(required=True)
@@ -28,7 +40,7 @@ class HotelSchema(ma.Schema):
     latitude = fields.Float(required=True)
 
     # Important information fields
-    address = fields.String(allow_none=True, default='')
+    address = fields.Nested(AddressSchema, allow_none=True)
     description = fields.String(allow_none=True, default='')
     phone = fields.String(allow_none=True, default='')
     website = fields.String(allow_none=True, default='')
@@ -57,15 +69,15 @@ class HotelSchema(ma.Schema):
     amenities = fields.List(fields.String(), allow_none=True, default=list)
 
     # These fields will be added by the GET API from relationship data
-    price_levels = fields.List(
+    priceLevels = fields.List(
         fields.String(), load_only=False, dump_only=True
     )
-    hotel_classes = fields.List(
+    hotelClasses = fields.List(
         fields.String(), load_only=False, dump_only=True
     )
 
     # Rating data
-    rating_histogram = fields.List(
+    ratingHistogram = fields.List(
         fields.Integer(), allow_none=True, default=list
     )
 
@@ -73,35 +85,63 @@ class HotelSchema(ma.Schema):
     # webUrl = fields.String(allow_none=True)
     # localName = fields.String(allow_none=True)
     # whatsAppRedirectUrl = fields.String(allow_none=True)
-    new_rating_histogram = fields.List(fields.Integer(), allow_none=True)
+    newRatingHistogram = fields.List(fields.Integer(), allow_none=True)
 
     @pre_load
     def process_input(self, data, **kwargs):
         """Pre-process input data before validation"""
         # Handle rating histogram conversion if needed
-        if 'ratingHistogram' in data and 'rating_histogram' not in data:
-            rh = data.pop('ratingHistogram', {})
-            data['rating_histogram'] = [
-                rh.get('count1', 0),
-                rh.get('count2', 0),
-                rh.get('count3', 0),
-                rh.get('count4', 0),
-                rh.get('count5', 0),
-            ]
+        if 'ratingHistogram' in data:
+            if isinstance(data['ratingHistogram'], dict):
+                # If it's a dictionary format like {count1: 10, count2: 20, ...}
+                rh = data['ratingHistogram']
+                data['ratingHistogram'] = [
+                    rh.get('count1', 0),
+                    rh.get('count2', 0),
+                    rh.get('count3', 0),
+                    rh.get('count4', 0),
+                    rh.get('count5', 0),
+                ]
+            elif not isinstance(data['ratingHistogram'], list):
+                # If it's not a list or dict, set to empty list
+                data['ratingHistogram'] = []
+        
+        # For backward compatibility with rating_histogram
+        if 'rating_histogram' in data and 'ratingHistogram' not in data:
+            if isinstance(data['rating_histogram'], list):
+                data['ratingHistogram'] = data.pop('rating_histogram')
+            else:
+                # If rating_histogram is not a list, initialize empty list
+                data.pop('rating_histogram')
+                data['ratingHistogram'] = []
 
-        # Handle address cleaning
+        # Handle address conversion to structured format
         if 'address' in data and isinstance(data['address'], str):
+            street = data['address']
+            # Extract city information
+            city_name = "Da Nang"
+            postal_code = "550000"
+            
+            # Clean up the address by removing city/postal code suffixes
             suffixes = [
-                ', Da Nang 550000 Vietnam',
-                ', Da Nang Vietnam',
-                'Da Nang 550000 Vietnam',
-                'Da Nang Vietnam',
+                f', {city_name} {postal_code} Vietnam',
+                f', {city_name} Vietnam',
+                f'{city_name} {postal_code} Vietnam',
+                f'{city_name} Vietnam',
             ]
-            address = data['address']
             for suffix in suffixes:
-                if address.endswith(suffix):
-                    data['address'] = address[: -len(suffix)].strip()
+                if street.endswith(suffix):
+                    street = street[: -len(suffix)].strip()
                     break
+
+            # Create structured address
+            data['address'] = {
+                'street': street,
+                'city': {
+                    'name': city_name,
+                    'postalCode': postal_code
+                }
+            }
 
         # Convert travelerChoiceAward to boolean
         if 'travelerChoiceAward' in data:
