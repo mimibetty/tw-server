@@ -1,6 +1,5 @@
 venv/
 .venv/
-migrations/
 .ruff_cache/
 __pycache__/
 

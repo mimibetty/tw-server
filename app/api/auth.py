@@ -1,181 +1,95 @@
-from flask import Blueprint, abort, render_template, request
+import re
+
+from flask import Blueprint, request
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
     get_jwt_identity,
     jwt_required,
 )
-from werkzeug.security import check_password_hash, generate_password_hash
+from marshmallow import ValidationError, fields, validates
+from werkzeug.security import check_password_hash
 
-from app.postgres import UserModel
-from app.schemas.auth import (
-    ForgotPasswordSchema,
-    MeSchema,
-    SendOTPSchema,
-    SignInSchema,
-    SignUpSchema,
-)
-from app.utils import generate_otp_code, send_async_email
-from app.utils.cache import Cache
-from app.utils.response import APIResponse
+from app.extensions import CamelCaseAutoSchema, CamelCaseSchema
+from app.models import User, db
 
-bp = Blueprint('auth', __name__, url_prefix='/auth')
+blueprint = Blueprint('auth', __name__, url_prefix='/auth')
 
 
-@bp.post('/sign-in')
-def sign_in():
-    inputs = SignInSchema().load(request.json)
+# Sign up
+class SignUpSchema(CamelCaseAutoSchema):
+    email = fields.Email(required=True)
+    password = fields.String(load_only=True)
 
-    # Query user from database
-    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
-    if not (
-        type(user) is UserModel and user.check_password(inputs['password'])
-    ):
-        abort(400, 'Invalid email or password')
+    class Meta:
+        fields = ('email', 'full_name', 'password')
+        model = User
+        load_instance = True
 
-    # Create tokens
-    access_token = create_access_token(identity=user.get_id())
-    refresh_token = create_refresh_token(identity=user.get_id())
-    return APIResponse.success(
-        data={'access_token': access_token, 'refresh_token': refresh_token}
-    )
+    @validates('email')
+    def validate_email(self, email):
+        user = User.query.filter(User.email == email).first()
+        if user:
+            raise ValidationError('Email already exists')
+        return email
 
-
-@bp.post('/refresh')
-@jwt_required(refresh=True)
-def refresh():
-    try:
-        identity = get_jwt_identity()
-        access_token = create_access_token(identity=identity)
-        return APIResponse.success(data={'access_token': access_token})
-    except Exception:
-        abort(401, 'Unauthorized')
+    @validates('password')
+    def validate_password(self, password):
+        pattern = r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$'
+        if not re.match(pattern, password):
+            raise ValidationError(
+                'Password must be at least 8 characters long, include at least one letter and one number'
+            )
+        return password
 
 
-@bp.post('/sign-up')
+@blueprint.post('/sign-up')
 def sign_up():
-    inputs = SignUpSchema().load(request.json)
-    user = UserModel(inputs['email'], inputs['password'], inputs['name'])
-    user.add()
-    return APIResponse.success(data={'email': user.email}, status=201)
+    schema = SignUpSchema()
+    user = schema.load(request.json)
+    db.session.add(user)
+    db.session.commit()
+
+    return schema.dump(user), 201
 
 
-@bp.post('/send-otp')
-def send_otp():
-    inputs = SendOTPSchema().load(request.json)
-    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
-
-    if type(user) is not UserModel:
-        abort(404, 'User not found')
-
-    if not inputs['reset'] and user.is_verified:
-        abort(400, 'User already verified')
-
-    # Generate OTP code
-    otp_code = generate_otp_code()
-
-    # Save to cache
-    Cache.delete('otp', inputs['email'])
-    Cache.set(
-        'otp',
-        inputs['email'],
-        generate_password_hash(otp_code),
-        expire_in_minutes=5,
-    )
-
-    # Send OTP code to user's email
-    if inputs['reset']:
-        # Reset password email
-        mail_html = render_template(
-            'email_reset_password.html', name=user.name, otp_code=otp_code
-        )
-        send_async_email(
-            subject='Reset Password',
-            recipients=[user.email],
-            html=mail_html,
-        )
-    else:
-        # Verification email
-        mail_html = render_template(
-            'email_otp.html', name=user.name, otp_code=otp_code
-        )
-        send_async_email(
-            subject='Email Verification',
-            recipients=[user.email],
-            html=mail_html,
-        )
-    return APIResponse.success()
+# Sign in
+class SignInRequestSchema(CamelCaseSchema):
+    email = fields.Email(required=True, load_only=True)
+    password = fields.String(required=True, load_only=True)
 
 
-@bp.post('/verify-email')
-def verify_email():
-    inputs = SendOTPSchema().load(request.json)
-
-    # Check if cache exists
-    cache = Cache.get('otp', inputs['email'])
-    if not cache or not check_password_hash(cache, inputs['otp']):
-        abort(400, 'One-time password is invalid or expired')
-
-    # Query user from database
-    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
-    if type(user) is not UserModel:
-        abort(404, 'User not found')
-
-    if user.is_verified:
-        abort(400, 'User already verified')
-
-    # Update user verification status
-    user.is_verified = True
-    user.update()
-
-    # Delete cache
-    Cache.delete('otp', inputs['email'])
-    return APIResponse.success()
+class SignInResponseSchema(CamelCaseSchema):
+    access_token = fields.String(required=True, dump_only=True)
+    refresh_token = fields.String(required=True, dump_only=True)
 
 
-@bp.get('/me')
-@jwt_required()
-def me():
-    try:
-        identity = get_jwt_identity()
-        # Check if cache exists
-        try:
-            cached_data = Cache.get('me', identity)
-            if cached_data:
-                return APIResponse.success(data=cached_data)
-        except Exception:
-            pass
+@blueprint.post('/sign-in')
+def sign_in():
+    data = SignInRequestSchema().load(request.json)
+    user = User.query.filter(User.email == data['email']).first()
+    if type(user) is not User or not check_password_hash(
+        user.password, data['password']
+    ):
+        return {'error': 'Invalid email or password'}, 401
 
-        # Query user from database
-        user = UserModel.query.get(identity)
-        if type(user) is not UserModel:
-            abort(404, 'User not found')
-
-        # Save to cache
-        data = MeSchema().dump(user)
-        Cache.set('me', identity, data)
-        return APIResponse.success(data=data)
-    except Exception:
-        abort(401, 'Unauthorized')
+    access_token = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
+    return SignInResponseSchema().dump(
+        {'access_token': access_token, 'refresh_token': refresh_token}
+    ), 200
 
 
-@bp.post('/forgot-password')
-def forgot_password():
-    inputs = ForgotPasswordSchema().load(request.json)
+# Refresh token
+class RefreshTokenResponseSchema(CamelCaseSchema):
+    access_token = fields.String(required=True, dump_only=True)
 
-    # Check if cache exists
-    cache = Cache.get('otp', inputs['email'])
-    if not cache or not check_password_hash(cache, inputs['otp']):
-        abort(400, 'One-time password is invalid or expired')
 
-    # Update user password
-    user = UserModel.query.filter(UserModel.email == inputs['email']).first()
-    if type(user) is not UserModel:
-        abort(404, 'User not found')
-
-    user.password = generate_password_hash(inputs['password'])
-    user.update()
-
-    # Remove cache
-    Cache.delete('otp', inputs['email'])
-    return APIResponse.success()
+@blueprint.post('/refresh')
+@jwt_required(refresh=True)
+def refresh_token():
+    identity = get_jwt_identity()
+    access_token = create_access_token(identity=identity)
+    return RefreshTokenResponseSchema().dump(
+        {'access_token': access_token}
+    ), 200

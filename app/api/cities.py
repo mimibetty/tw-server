@@ -1,84 +1,148 @@
-import uuid
-from datetime import datetime, timezone
-
 from flask import Blueprint, request
+from marshmallow import ValidationError, fields, validates
 
-from app.schemas.cities import CitySchema
-from app.utils import execute_neo4j_query
-from app.utils.response import APIResponse
+from app.extensions import CamelCaseSchema
+from app.utils import create_paging, execute_neo4j_query
 
-bp = Blueprint('cities', __name__, url_prefix='/cities')
+blueprint = Blueprint('cities', __name__, url_prefix='/cities')
 
 
-@bp.post('')
+class CitySchema(CamelCaseSchema):
+    created_at = fields.String(dump_only=True)
+    element_id = fields.String(dump_only=True)
+
+    name = fields.String(required=True)
+    postal_code = fields.String(required=True)
+
+    @validates('postal_code')
+    def validate_postal_code(self, value: str):
+        if not value.isdigit():
+            raise ValidationError('Postal code must be numeric')
+        if len(value) != 6:
+            raise ValidationError('Postal code must be 6 digits long')
+
+
+@blueprint.post('/')
 def create_city():
-    schema = CitySchema()
-    inputs = schema.load(request.json)
+    data = CitySchema().load(request.json)
     result = execute_neo4j_query(
         """
         MERGE (c:City {postal_code: $postal_code})
-        SET c.id = $id, c.created_at = $created_at, c.name = $name
-        RETURN c
+        ON CREATE SET c.name = $name, c.created_at = timestamp()
+        WITH c, apoc.date.format(c.created_at, 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7') AS formatted_created_at
+        SET c.created_at = formatted_created_at
+        RETURN c, elementId(c) AS element_id
         """,
         {
-            'id': str(uuid.uuid4()),
-            'created_at': datetime.now(timezone.utc).isoformat(),
-            'name': inputs['name'],
-            'postal_code': inputs['postal_code'],
+            'name': data['name'],
+            'postal_code': data['postal_code'],
         },
     )
-    return APIResponse.success(data=schema.dump(result[0]['c']), status=201)
+    city = result[0]['c']
+    city['element_id'] = result[0]['element_id']
+    return CitySchema().dump(city), 201
 
 
-@bp.get('')
+@blueprint.get('/')
 def get_cities():
-    page = max(request.args.get('page', default=1, type=int), 1)
-    per_page = min(request.args.get('per_page', default=10, type=int), 50)
+    # Get pagination parameters from the request
+    page = int(request.args.get('page', 1))
+    size = int(request.args.get('size', 10))
+    offset = (page - 1) * size
 
-    # Query the database for total records
-    total_records_result = execute_neo4j_query(
-        'MATCH (c:City) RETURN count(c) as total_records'
-    )
-
-    # Query the database for paginated results
-    results = execute_neo4j_query(
+    # Query to get total count of cities
+    total_count_result = execute_neo4j_query(
         """
-        MATCH (c:City) RETURN c
-        ORDER BY c.postal_code SKIP $offset LIMIT $limit
+        MATCH (c:City)
+        RETURN count(c) AS total_count
+        """
+    )
+    total_count = total_count_result[0]['total_count']
+
+    # Query to get paginated cities
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City)
+        RETURN c, elementId(c) AS element_id
+        ORDER BY c.postal_code
+        SKIP $offset
+        LIMIT $size
         """,
-        {'offset': (page - 1) * per_page, 'limit': per_page},
+        {'offset': offset, 'size': size},
     )
 
-    # Process the results
-    schema = CitySchema()
-    return APIResponse.paginate(
-        data=[schema.dump(item.get('c')) for item in results],
+    # Add the elementId to each city
+    cities = []
+    for record in result:
+        city = record['c']
+        city['element_id'] = record['element_id']
+        cities.append(city)
+
+    # Create paginated response
+    response = create_paging(
+        data=CitySchema(many=True).dump(cities),
         page=page,
-        per_page=per_page,
-        total_records=total_records_result[0]['total_records'],
+        size=size,
+        offset=offset,
+        total_count=total_count,
     )
 
+    return response, 200
 
-@bp.delete('/<postal_code>/children')
-def delete_city_children(postal_code):
-    # Xóa tất cả các node con (categories, places, ...) của thành phố dựa trên postal_code
-    # Kiểm tra city tồn tại
-    city_result = execute_neo4j_query(
-        'MATCH (c:City {postal_code: $postal_code}) RETURN c',
-        {'postal_code': postal_code},
-    )
-    if not city_result:
-        return APIResponse.error('City not found', status=404)
 
-    execute_neo4j_query(
+@blueprint.get('/<string:postal_code>')
+def get_city_by_postal_code(postal_code):
+    result = execute_neo4j_query(
         """
         MATCH (c:City {postal_code: $postal_code})
-        OPTIONAL MATCH (c)-[*]->(descendant)
-        WHERE descendant IS NOT NULL
-        DETACH DELETE descendant
+        RETURN c, elementId(c) AS element_id
         """,
         {'postal_code': postal_code},
     )
-    return APIResponse.success(
-        data={'message': 'All child nodes deleted for city'}, status=200
+
+    if not result:
+        return {'error': 'City not found'}, 404
+
+    city = result[0]['c']
+    city['element_id'] = result[0]['element_id']
+    return CitySchema().dump(city), 200
+
+
+@blueprint.put('/<string:postal_code>')
+def update_city(postal_code):
+    data = CitySchema().load(request.json)
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        SET c.name = $name
+        RETURN c, elementId(c) AS element_id
+        """,
+        {
+            'postal_code': postal_code,
+            'name': data['name'],
+        },
     )
+
+    if not result:
+        return {'error': 'City not found'}, 404
+
+    city = result[0]['c']
+    city['element_id'] = result[0]['element_id']
+    return CitySchema().dump(city), 200
+
+
+@blueprint.delete('/<string:postal_code>')
+def delete_city(postal_code):
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        DELETE c
+        RETURN count(c) AS deleted_count
+        """,
+        {'postal_code': postal_code},
+    )
+
+    if not result or result[0]['deleted_count'] == 0:
+        return {'error': 'City not found'}, 404
+
+    return 204

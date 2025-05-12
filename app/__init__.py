@@ -1,62 +1,58 @@
-from threading import Lock
-
 import redis
 from flask import Flask
 
-from .api import bp
-from .constants import TEMPLATES_DIR
+from . import extensions as exts
+from .api import blueprint
 from .environments import (
     REDIS_DB,
     REDIS_HOST,
     REDIS_PASSWORD,
     REDIS_PORT,
     REDIS_USERNAME,
+    TEMPLATES_DIR,
     Config,
 )
-from .extensions import cors, jwt, ma, mail, migrate
-from .postgres import db
+from .models import db
 
 
 class AppContext:
-    _instance = None
-    _lock = Lock()
+    instance = None
 
-    def _initialize(self):
-        self._app = Flask(__name__, template_folder=TEMPLATES_DIR)
-        self._app.config.from_object(Config)
+    def init(self):
+        self.app = Flask(__name__, template_folder=TEMPLATES_DIR)
+        self.app.config.from_object(Config)
 
-        # Initialize Redis
-        self._redis = redis.Redis(
+        # Init Redis
+        self.redis = redis.Redis(
             host=REDIS_HOST,
-            port=int(REDIS_PORT),
+            port=REDIS_PORT,
             db=REDIS_DB,
             decode_responses=True,
             username=REDIS_USERNAME,
             password=REDIS_PASSWORD,
         )
-        self._redis.flushall()
+        self.redis.flushall()
 
-        # Initialize extensions
-        db.init_app(self._app)
-        ma.init_app(self._app)
-        jwt.init_app(self._app)
-        cors.init_app(self._app)
-        mail.init_app(self._app)
-        migrate.init_app(self._app, db)
+        # Init extensions
+        db.init_app(self.app)
+        exts.ma.init_app(self.app)
+        exts.jwt.init_app(self.app)
+        exts.cors.init_app(self.app)
+        exts.mail.init_app(self.app)
+        exts.migrate.init_app(self.app, db)
 
         # Register blueprints
-        self._app.register_blueprint(bp)
+        self.app.register_blueprint(blueprint)
 
     def __new__(cls):
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    cls._instance = super(AppContext, cls).__new__(cls)
-                    cls._instance._initialize()
-        return cls._instance
+        if not cls.instance:
+            cls.instance = super(AppContext, cls).__new__(cls)
+            cls.instance.init()
+
+        return cls.instance
 
     def get_app(self) -> Flask:
-        return self._app
+        return self.app
 
     def get_redis(self) -> redis.Redis:
-        return self._redis
+        return self.redis
