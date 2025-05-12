@@ -47,9 +47,7 @@ class HotelSchema(ma.Schema):
     email = fields.String(allow_none=True, default='')
 
     # Hotel specific fields
-    hotelClass = fields.Float(
-        allow_none=True
-    )  # Kept for schema compatibility but stored as relationship
+    hotelClass = fields.String(allow_none=True)  # Kept for schema compatibility but stored as relationship
     priceRange = fields.String(allow_none=True)
     priceLevel = fields.String(
         allow_none=True
@@ -147,12 +145,12 @@ class HotelSchema(ma.Schema):
         if 'travelerChoiceAward' in data:
             data['travelerChoiceAward'] = bool(data['travelerChoiceAward'])
 
-        # Convert hotelClass to float if it's a string
+        # Process hotelClass if it's not a string
         if 'hotelClass' in data and data['hotelClass'] is not None:
-            try:
-                data['hotelClass'] = float(data['hotelClass'])
-            except (ValueError, TypeError):
-                # If conversion fails, set to None
+            # Convert to string, but handle "0.0" or "undefined" as null
+            if str(data['hotelClass']) in ["0.0", "undefined", "0"]:
                 data['hotelClass'] = None
+            else:
+                data['hotelClass'] = str(data['hotelClass'])
 
         return data

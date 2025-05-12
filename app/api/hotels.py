@@ -349,12 +349,17 @@ def get_hotels():
         # Add priceLevels
         hotel['priceLevels'] = item.get('price_levels', [])
 
-        # Add hotelClasses and convert "0.0" to "undefined"
+        # Convert hotelClasses from list to single string value
         hotel_classes = item.get('hotel_classes', [])
-        hotel['hotelClasses'] = [
-            'undefined' if str(cls) == '0.0' else str(cls)
-            for cls in hotel_classes
-        ]
+        # Take the first class value if exists, otherwise null
+        if hotel_classes and len(hotel_classes) > 0:
+            cls_value = str(hotel_classes[0])
+            if cls_value == "0.0" or cls_value == "undefined":
+                hotel['hotelClass'] = None
+            else:
+                hotel['hotelClass'] = cls_value
+        else:
+            hotel['hotelClass'] = None
         
         # Get street directly from the Neo4j node's address property
         street = neo4j_node.get('address', '')
@@ -433,11 +438,17 @@ def get_hotel_by_id(id):
     # Add priceLevels
     hotel['priceLevels'] = item.get('price_levels', [])
 
-    # Add hotelClasses and convert "0.0" to "undefined"
+    # Convert hotelClasses from list to single string value
     hotel_classes = item.get('hotel_classes', [])
-    hotel['hotelClasses'] = [
-        'undefined' if str(cls) == '0.0' else str(cls) for cls in hotel_classes
-    ]
+    # Take the first class value if exists, otherwise null
+    if hotel_classes and len(hotel_classes) > 0:
+        cls_value = str(hotel_classes[0])
+        if cls_value == "0.0" or cls_value == "undefined":
+            hotel['hotelClass'] = None
+        else:
+            hotel['hotelClass'] = cls_value
+    else:
+        hotel['hotelClass'] = None
     
     # Get street directly from the Neo4j node's address property
     street = neo4j_node.get('address', '')
