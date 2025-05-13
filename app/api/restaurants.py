@@ -2,7 +2,7 @@ import json
 import logging
 
 from flask import Blueprint, request
-from marshmallow import ValidationError, fields, validates, pre_load
+from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
 from app.utils import create_paging, execute_neo4j_query, get_redis
@@ -59,7 +59,9 @@ class ShortRestaurantSchema(CamelCaseSchema):
     name = fields.String(required=True)
     price_levels = fields.List(fields.String(), required=False, default=list)
     rating = fields.Float(required=False, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), required=False, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), required=False, default=list
+    )
     raw_ranking = fields.Float(required=True, load_only=True)
     street = fields.String(required=False, allow_none=True)
     type = fields.String(dump_only=True)
@@ -94,25 +96,37 @@ class ShortRestaurantSchema(CamelCaseSchema):
         if 'rating_histogram' not in data and 'ratingHistogram' not in data:
             data['ratingHistogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
-            
+
         # Calculate rating from histogram if available
-        if 'rating_histogram' in data and isinstance(data['rating_histogram'], list) and len(data['rating_histogram']) == 5:
+        if (
+            'rating_histogram' in data
+            and isinstance(data['rating_histogram'], list)
+            and len(data['rating_histogram']) == 5
+        ):
             rh = data['rating_histogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-        elif 'ratingHistogram' in data and isinstance(data['ratingHistogram'], list) and len(data['ratingHistogram']) == 5:
+        elif (
+            'ratingHistogram' in data
+            and isinstance(data['ratingHistogram'], list)
+            and len(data['ratingHistogram']) == 5
+        ):
             rh = data['ratingHistogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-                
+
         return data
 
 
@@ -128,7 +142,9 @@ class RestaurantSchema(ShortRestaurantSchema):
     hours = fields.Nested(HoursSchema, required=False, allow_none=True)
     dishes = fields.List(fields.String(), required=False, default=list)
     features = fields.List(fields.String(), required=False, default=list)
-    dietary_restrictions = fields.List(fields.String(), required=False, default=list)
+    dietary_restrictions = fields.List(
+        fields.String(), required=False, default=list
+    )
     meal_types = fields.List(fields.String(), required=False, default=list)
     cuisines = fields.List(fields.String(), required=False, default=list)
     traveler_choice_award = fields.Boolean(required=False, default=False)
@@ -140,7 +156,7 @@ def create_restaurant():
 
     # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
-    
+
     # Get data with defaults for empty lists
     features = data.get('features', [])
     price_levels = data.get('price_levels', [])
@@ -176,7 +192,7 @@ def create_restaurant():
             })
     MERGE (r)-[:LOCATED_IN]->(c)
     """
-    
+
     # Add features relationship if features list is not empty
     if features:
         query += """
@@ -185,7 +201,7 @@ def create_restaurant():
         MERGE (a:Feature {name: feature_name})
         MERGE (r)-[:HAS_FEATURE]->(a)
         """
-    
+
     # Add price_levels relationship if price_levels list is not empty
     if price_levels:
         query += """
@@ -194,7 +210,7 @@ def create_restaurant():
         MERGE (pl:PriceLevel {level: price_level})
         MERGE (r)-[:HAS_PRICE_LEVEL]->(pl)
         """
-    
+
     # Add meal_types relationship if meal_types list is not empty
     if meal_types:
         query += """
@@ -203,7 +219,7 @@ def create_restaurant():
         MERGE (mt:MealType {name: meal_type})
         MERGE (r)-[:SERVES_MEAL]->(mt)
         """
-    
+
     # Add cuisines relationship if cuisines list is not empty
     if cuisines:
         query += """
@@ -212,7 +228,7 @@ def create_restaurant():
         MERGE (cu:Cuisine {name: cuisine})
         MERGE (r)-[:HAS_CUISINE]->(cu)
         """
-    
+
     # Finalize query to return data
     query += """
     RETURN
@@ -240,7 +256,9 @@ def create_restaurant():
             'phone': data.get('phone'),
             'website': data.get('website'),
             'menu_web_url': data.get('menu_web_url'),
-            'hours': json.dumps(data.get('hours')) if data.get('hours') else None,
+            'hours': json.dumps(data.get('hours'))
+            if data.get('hours')
+            else None,
             'dishes': data.get('dishes', []),
             'features': features,
             'dietary_restrictions': data.get('dietary_restrictions', []),
@@ -360,12 +378,12 @@ def get_restaurant(restaurant_id):
     restaurant['price_levels'] = result[0]['price_levels']
     restaurant['cuisines'] = result[0]['cuisines']
     restaurant['meal_types'] = result[0]['meal_types']
-    
+
     # Parse hours JSON if stored as string
     if 'hours' in restaurant and isinstance(restaurant['hours'], str):
         try:
             restaurant['hours'] = json.loads(restaurant['hours'])
-        except:
+        except Exception:
             restaurant['hours'] = None
 
     # Cache the response for 6 hours

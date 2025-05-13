@@ -5,9 +5,16 @@ from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 
 jwt = JWTManager()
-cors = CORS()
 mail = Mail()
 migrate = Migrate()
+
+# Flask-CORS
+cors = CORS(
+    max_age=86400,
+    supports_credentials=True,
+    allow_headers=['Content-Type', 'Authorization'],
+    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+)
 
 # Flask-Marshmallow
 ma = Marshmallow()

@@ -2,13 +2,14 @@ import json
 import logging
 
 from flask import Blueprint, request
-from marshmallow import ValidationError, fields, post_load, pre_load, validates
+from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
+
 
 class AttachCitySchema(CamelCaseSchema):
     created_at = fields.String(dump_only=True)
@@ -41,10 +42,12 @@ class ShortThingToDoSchema(CamelCaseSchema):
     longitude = fields.Float(required=True)
     name = fields.String(required=True)
     rating = fields.Float(required=False, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), required=False, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), required=False, default=list
+    )
     raw_ranking = fields.Float(required=True, load_only=True)
     street = fields.String(required=False, allow_none=True)
-    type = fields.String(dump_only=True, default="THING-TO-DO")
+    type = fields.String(dump_only=True, default='THING-TO-DO')
 
     @validates('rating')
     def validate_rating(self, value: float):
@@ -69,33 +72,46 @@ class ShortThingToDoSchema(CamelCaseSchema):
         if value < 0 or value > 5:
             raise ValidationError('Raw ranking must be between 0 and 5')
         return value
-    
+
     @pre_load
     def calculate_rating_from_histogram(self, data, **kwargs):
         # Set default rating_histogram to [0,0,0,0,0] if not provided
         if 'rating_histogram' not in data and 'ratingHistogram' not in data:
             data['ratingHistogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
-            
+
         # Calculate rating from histogram if available
-        if 'rating_histogram' in data and isinstance(data['rating_histogram'], list) and len(data['rating_histogram']) == 5:
+        if (
+            'rating_histogram' in data
+            and isinstance(data['rating_histogram'], list)
+            and len(data['rating_histogram']) == 5
+        ):
             rh = data['rating_histogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-        elif 'ratingHistogram' in data and isinstance(data['ratingHistogram'], list) and len(data['ratingHistogram']) == 5:
+        elif (
+            'ratingHistogram' in data
+            and isinstance(data['ratingHistogram'], list)
+            and len(data['ratingHistogram']) == 5
+        ):
             rh = data['ratingHistogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-                
+
         return data
+
 
 class ThingToDoSchema(ShortThingToDoSchema):
     # Common fields
@@ -107,7 +123,6 @@ class ThingToDoSchema(ShortThingToDoSchema):
     description = fields.String(required=False, allow_none=True)
     subtypes = fields.List(fields.String(), required=False, default=list)
     subcategories = fields.List(fields.String(), required=False, default=list)
-    
 
 
 @blueprint.post('/')
@@ -149,7 +164,7 @@ def create_thing_to_do():
         UNWIND subtypes AS subtype
         MERGE (st:Subtype {name: subtype})
         MERGE (t)-[:HAS_SUBTYPE]->(st)
-        
+
         // Handle subcategories if provided
         WITH t, c, $subcategories AS subcategories
         UNWIND subcategories AS subcategory
@@ -244,7 +259,7 @@ def get_things_to_do():
         thing['element_id'] = record['element_id']
         thing['subtypes'] = record['subtypes']
         thing['subcategories'] = record['subcategories']
-        
+
         # Calculate rating if not present
         if 'rating' not in thing or thing['rating'] is None:
             rh = thing.get('rating_histogram', [])
@@ -253,7 +268,7 @@ def get_things_to_do():
                 if total > 0:
                     rating = sum((i + 1) * rh[i] for i in range(5)) / total
                     thing['rating'] = round(rating, 1)
-        
+
         processed_results.append(thing)
 
     # Create paginated response
@@ -303,7 +318,7 @@ def get_thing_to_do(thing_to_do_id):
     thing_to_do['element_id'] = result[0]['element_id']
     thing_to_do['subtypes'] = result[0]['subtypes']
     thing_to_do['subcategories'] = result[0]['subcategories']
-    
+
     # Calculate rating if not present
     if 'rating' not in thing_to_do or thing_to_do['rating'] is None:
         rh = thing_to_do.get('rating_histogram', [])

@@ -2,7 +2,7 @@ import json
 import logging
 
 from flask import Blueprint, request
-from marshmallow import ValidationError, fields, validates, pre_load
+from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
 from app.utils import create_paging, execute_neo4j_query, get_redis
@@ -43,7 +43,9 @@ class ShortHotelSchema(CamelCaseSchema):
     name = fields.String(required=True)
     price_levels = fields.List(fields.String(), required=False, default=list)
     rating = fields.Float(required=False, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), required=False, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), required=False, default=list
+    )
     raw_ranking = fields.Float(required=True, load_only=True)
     street = fields.String(required=False, allow_none=True)
     type = fields.String(dump_only=True)
@@ -78,25 +80,37 @@ class ShortHotelSchema(CamelCaseSchema):
         if 'rating_histogram' not in data and 'ratingHistogram' not in data:
             data['ratingHistogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
-            
+
         # Calculate rating from histogram if available
-        if 'rating_histogram' in data and isinstance(data['rating_histogram'], list) and len(data['rating_histogram']) == 5:
+        if (
+            'rating_histogram' in data
+            and isinstance(data['rating_histogram'], list)
+            and len(data['rating_histogram']) == 5
+        ):
             rh = data['rating_histogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-        elif 'ratingHistogram' in data and isinstance(data['ratingHistogram'], list) and len(data['ratingHistogram']) == 5:
+        elif (
+            'ratingHistogram' in data
+            and isinstance(data['ratingHistogram'], list)
+            and len(data['ratingHistogram']) == 5
+        ):
             rh = data['ratingHistogram']
             total = sum(rh)
             if total > 0:
-                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                calculated_rating = (
+                    sum((i + 1) * rh[i] for i in range(5)) / total
+                )
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-                
+
         return data
 
 
@@ -112,7 +126,7 @@ class HotelSchema(ShortHotelSchema):
     features = fields.List(fields.String(), required=False, default=list)
     hotel_class = fields.String(required=False, allow_none=True)
     number_of_rooms = fields.Integer(required=False)
-    price_range = fields.String(required=False, allow_none=True) 
+    price_range = fields.String(required=False, allow_none=True)
 
     @validates('number_of_rooms')
     def validate_number_of_rooms(self, value: int):
@@ -160,7 +174,7 @@ def create_hotel():
             })
     MERGE (h)-[:LOCATED_IN]->(c)
     """
-    
+
     # Add features relationship if features list is not empty
     if features:
         query += """
@@ -169,7 +183,7 @@ def create_hotel():
         MERGE (a:Feature {name: feature_name})
         MERGE (h)-[:HAS_FEATURE]->(a)
         """
-    
+
     # Add price_levels relationship if price_levels list is not empty
     if price_levels:
         query += """
@@ -178,7 +192,7 @@ def create_hotel():
         MERGE (pl:PriceLevel {level: price_level})
         MERGE (h)-[:HAS_PRICE_LEVEL]->(pl)
         """
-        
+
     # Add hotel class relationship if hotel_class is provided
     if data.get('hotel_class'):
         query += """
@@ -186,7 +200,7 @@ def create_hotel():
         MERGE (hc:HotelClass {name: $hotel_class})
         MERGE (h)-[:BELONGS_TO_CLASS]->(hc)
         """
-    
+
     # Finalize query to return data
     query += """
     RETURN
@@ -233,11 +247,11 @@ def create_hotel():
     hotel = result[0]['h']
     hotel['element_id'] = result[0]['element_id']
     hotel['city'] = result[0]['c']
-    
+
     # Add hotel_class to the response if it was provided
     if data.get('hotel_class'):
         hotel['hotel_class'] = data['hotel_class']
-        
+
     return schema.dump(hotel), 201
 
 
