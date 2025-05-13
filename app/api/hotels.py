@@ -2,7 +2,7 @@ import json
 import logging
 
 from flask import Blueprint, request
-from marshmallow import ValidationError, fields, validates
+from marshmallow import ValidationError, fields, validates, pre_load
 
 from app.extensions import CamelCaseSchema
 from app.utils import create_paging, execute_neo4j_query, get_redis
@@ -36,33 +36,33 @@ class ShortHotelSchema(CamelCaseSchema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     city = fields.Nested(AttachCitySchema, required=True)
-    email = fields.Email(required=True, allow_none=True)
+    email = fields.Email(required=False, allow_none=True)
     image = fields.String(required=True)
     latitude = fields.Float(required=True)
     longitude = fields.Float(required=True)
     name = fields.String(required=True)
-    price_levels = fields.List(fields.String(), required=True)
-    rating = fields.Float(required=True)
-    rating_histogram = fields.List(fields.Integer(), required=True)
+    price_levels = fields.List(fields.String(), required=False, default=list)
+    rating = fields.Float(required=False, allow_none=True)
+    rating_histogram = fields.List(fields.Integer(), required=False, default=list)
     raw_ranking = fields.Float(required=True, load_only=True)
-    street = fields.String(required=True)
+    street = fields.String(required=False, allow_none=True)
     type = fields.String(dump_only=True)
 
     @validates('rating')
     def validate_rating(self, value: float):
-        if value < 0 or value > 5:
+        if value is not None and (value < 0 or value > 5):
             raise ValidationError('Rating must be between 0 and 5')
         return value
 
     @validates('rating_histogram')
     def validate_rating_histogram(self, value: list):
-        if len(value) != 5:
+        if value and len(value) != 5:
             raise ValidationError(
                 'Rating histogram must contain exactly 5 integers'
             )
-        if not all(isinstance(i, int) and i > 0 for i in value):
+        if value and not all(isinstance(i, int) and i >= 0 for i in value):
             raise ValidationError(
-                'Rating histogram must be a list of 5 positive integers'
+                'Rating histogram must be a list of 5 non-negative integers'
             )
         return value
 
@@ -72,104 +72,152 @@ class ShortHotelSchema(CamelCaseSchema):
             raise ValidationError('Raw ranking must be between 0 and 5')
         return value
 
+    @pre_load
+    def calculate_rating_from_histogram(self, data, **kwargs):
+        # Set default rating_histogram to [0,0,0,0,0] if not provided
+        if 'rating_histogram' not in data and 'ratingHistogram' not in data:
+            data['ratingHistogram'] = [0, 0, 0, 0, 0]
+            data['rating'] = 0
+            
+        # Calculate rating from histogram if available
+        if 'rating_histogram' in data and isinstance(data['rating_histogram'], list) and len(data['rating_histogram']) == 5:
+            rh = data['rating_histogram']
+            total = sum(rh)
+            if total > 0:
+                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                data['rating'] = round(calculated_rating, 1)
+            else:
+                data['rating'] = 0
+        elif 'ratingHistogram' in data and isinstance(data['ratingHistogram'], list) and len(data['ratingHistogram']) == 5:
+            rh = data['ratingHistogram']
+            total = sum(rh)
+            if total > 0:
+                calculated_rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                data['rating'] = round(calculated_rating, 1)
+            else:
+                data['rating'] = 0
+                
+        return data
+
 
 class HotelSchema(ShortHotelSchema):
     # Common fields
-    phone = fields.String(required=True, allow_none=True)
-    photos = fields.List(fields.String(), required=True)
-    website = fields.String(required=True, allow_none=True)
+    phone = fields.String(required=False, allow_none=True)
+    photos = fields.List(fields.String(), required=False, default=list)
+    website = fields.String(required=False, allow_none=True)
 
     # Specific fields
-    ai_reviews_summary = fields.String(required=True)
-    description = fields.String(required=True, allow_none=True)
-    features = fields.List(fields.String(), required=True)
-    hotel_class = fields.String(required=True)
-    number_of_rooms = fields.Integer(required=True)
+    ai_reviews_summary = fields.String(required=False, allow_none=True)
+    description = fields.String(required=False, allow_none=True)
+    features = fields.List(fields.String(), required=False, default=list)
+    hotel_class = fields.String(required=False, allow_none=True)
+    number_of_rooms = fields.Integer(required=False)
+    price_range = fields.String(required=False, allow_none=True) 
 
     @validates('number_of_rooms')
     def validate_number_of_rooms(self, value: int):
-        if value <= 0:
+        if value is not None and value <= 0:
             raise ValidationError('Number of rooms must be a positive integer')
         return value
 
 
 @blueprint.post('/')
 def create_hotel():
-    data = HotelSchema().load(request.json)
+    schema = HotelSchema()
+    data = schema.load(request.json)
 
     # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
 
-    # Create the hotel and attach it to the city in Neo4j
-    result = execute_neo4j_query(
-        """
-        MATCH (c:City {postal_code: $postal_code})
-        CREATE
-            (h:Hotel
-                {
-                    name: $name,
-                    image: $image,
-                    latitude: $latitude,
-                    longitude: $longitude,
-                    photos: $photos,
-                    rating: $rating,
-                    rating_histogram: $rating_histogram,
-                    raw_ranking: $raw_ranking,
-                    ai_reviews_summary: $ai_reviews_summary,
-                    description: $description,
-                    email: $email,
-                    number_of_rooms: $number_of_rooms,
-                    phone: $phone,
-                    type: 'HOTEL',
-                    website: $website,
-                    created_at:
-                        apoc.date.format(timestamp(), 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7')
-                })
-        MERGE (h)-[:LOCATED_IN]->(c)
+    # Get data with defaults for empty lists
+    features = data.get('features', [])
+    price_levels = data.get('price_levels', [])
 
-        // Handle features
-        WITH h, c, $features AS features
-        UNWIND features AS feature_name
+    # Base query to create hotel
+    query = """
+    MATCH (c:City {postal_code: $postal_code})
+    CREATE
+        (h:Hotel
+            {
+                name: $name,
+                image: $image,
+                latitude: $latitude,
+                longitude: $longitude,
+                photos: $photos,
+                rating: $rating,
+                rating_histogram: $rating_histogram,
+                raw_ranking: $raw_ranking,
+                ai_reviews_summary: $ai_reviews_summary,
+                description: $description,
+                email: $email,
+                number_of_rooms: $number_of_rooms,
+                phone: $phone,
+                type: 'HOTEL',
+                website: $website,
+                price_range: $price_range,
+                created_at:
+                    apoc.date.format(timestamp(), 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7')
+            })
+    MERGE (h)-[:LOCATED_IN]->(c)
+    """
+    
+    # Add features relationship if features list is not empty
+    if features:
+        query += """
+        WITH h, c
+        UNWIND $features AS feature_name
         MERGE (a:Feature {name: feature_name})
         MERGE (h)-[:HAS_FEATURE]->(a)
-
-        // Handle hotel_class
-        WITH h, c, $hotel_class AS hotel_class
-        MERGE (hc:HotelClass {name: hotel_class})
-        MERGE (h)-[:BELONGS_TO_CLASS]->(hc)
-
-        // Handle price_levels
-        WITH h, c, $price_levels AS price_levels
-        UNWIND price_levels AS price_level
+        """
+    
+    # Add price_levels relationship if price_levels list is not empty
+    if price_levels:
+        query += """
+        WITH h, c
+        UNWIND $price_levels AS price_level
         MERGE (pl:PriceLevel {level: price_level})
         MERGE (h)-[:HAS_PRICE_LEVEL]->(pl)
+        """
+        
+    # Add hotel class relationship if hotel_class is provided
+    if data.get('hotel_class'):
+        query += """
+        WITH h, c
+        MERGE (hc:HotelClass {name: $hotel_class})
+        MERGE (h)-[:BELONGS_TO_CLASS]->(hc)
+        """
+    
+    # Finalize query to return data
+    query += """
+    RETURN
+        h,
+        elementId(h) AS element_id,
+        c
+    """
 
-        // Return hotel with related data
-        RETURN
-            h,
-            elementId(h) AS element_id,
-            [(h)-[:BELONGS_TO_CLASS]->(hc:HotelClass) | hc.name ][0] AS hotel_class,
-            c
-        """,
+    # Execute the Neo4j query
+    result = execute_neo4j_query(
+        query,
         {
             'postal_code': city_postal_code,
             'name': data['name'],
             'image': data['image'],
             'latitude': data['latitude'],
             'longitude': data['longitude'],
-            'photos': data['photos'],
-            'price_levels': data['price_levels'],
-            'rating': data['rating'],
-            'rating_histogram': data['rating_histogram'],
+            'photos': data.get('photos', []),
+            'price_levels': price_levels,
+            'rating': data.get('rating'),
+            'rating_histogram': data.get('rating_histogram', []),
             'raw_ranking': data['raw_ranking'],
-            'ai_reviews_summary': data['ai_reviews_summary'],
-            'features': data['features'],
-            'description': data['description'],
-            'email': data['email'],
-            'hotel_class': data['hotel_class'],
-            'number_of_rooms': data['number_of_rooms'],
-            'phone': data['phone'],
-            'website': data['website'],
+            'ai_reviews_summary': data.get('ai_reviews_summary'),
+            'description': data.get('description'),
+            'email': data.get('email'),
+            'phone': data.get('phone'),
+            'website': data.get('website'),
+            'number_of_rooms': data.get('number_of_rooms'),
+            'hotel_class': data.get('hotel_class'),
+            'price_range': data.get('price_range'),
+            'features': features,
         },
     )
 
@@ -185,7 +233,12 @@ def create_hotel():
     hotel = result[0]['h']
     hotel['element_id'] = result[0]['element_id']
     hotel['city'] = result[0]['c']
-    return ShortHotelSchema().dump(hotel), 201
+    
+    # Add hotel_class to the response if it was provided
+    if data.get('hotel_class'):
+        hotel['hotel_class'] = data['hotel_class']
+        
+    return schema.dump(hotel), 201
 
 
 @blueprint.get('/')
