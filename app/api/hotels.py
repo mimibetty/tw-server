@@ -223,6 +223,11 @@ def get_hotels():
         {'offset': offset, 'size': size},
     )
 
+    # Add element_id to each hotel record
+    for record in result:
+        record['h']['element_id'] = record['element_id']
+        del record['element_id']
+
     # Create paginated response
     response = create_paging(
         data=ShortHotelSchema(many=True).dump(
@@ -238,3 +243,45 @@ def get_hotels():
     redis.set(cache_key, json.dumps(response), ex=21600)
 
     return response, 200
+
+
+@blueprint.get('/<hotel_id>')
+def get_hotel(hotel_id):
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'hotels:{hotel_id}'
+    cached_response = redis.get(cache_key)
+    if cached_response:
+        return json.loads(cached_response), 200
+
+    # Get the hotel details along with features, price_levels, and hotel_class
+    result = execute_neo4j_query(
+        """
+        MATCH (h:Hotel)
+        WHERE elementId(h) = $hotel_id
+        OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
+        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+        RETURN
+            h,
+            elementId(h) AS element_id,
+            collect(DISTINCT f.name) AS features,
+            collect(DISTINCT pl.level) AS price_levels,
+            hc.name AS hotel_class
+        """,
+        {'hotel_id': hotel_id},
+    )
+
+    if not result:
+        return {'error': 'Hotel not found'}, 404
+
+    hotel = result[0]['h']
+    hotel['element_id'] = result[0]['element_id']
+    hotel['features'] = result[0]['features']
+    hotel['price_levels'] = result[0]['price_levels']
+    hotel['hotel_class'] = result[0]['hotel_class']
+
+    # Cache the response for 6 hours
+    redis.set(cache_key, json.dumps(hotel), ex=21600)
+
+    return HotelSchema().dump(hotel), 200
