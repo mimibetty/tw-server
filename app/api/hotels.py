@@ -1,13 +1,17 @@
+import json
+import logging
+
 from flask import Blueprint, request
 from marshmallow import ValidationError, fields, validates
 
 from app.extensions import CamelCaseSchema
-from app.utils import create_paging, execute_neo4j_query
+from app.utils import create_paging, execute_neo4j_query, get_redis
 
+logger = logging.getLogger(__name__)
 blueprint = Blueprint('hotels', __name__, url_prefix='/hotels')
 
 
-class CitySchema(CamelCaseSchema):
+class AttachCitySchema(CamelCaseSchema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
@@ -28,33 +32,21 @@ class CitySchema(CamelCaseSchema):
         return value
 
 
-class HotelSchema(CamelCaseSchema):
+class ShortHotelSchema(CamelCaseSchema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
-
-    # Common fields
-    city = fields.Nested(CitySchema)
+    city = fields.Nested(AttachCitySchema, required=True)
     email = fields.Email(required=True, allow_none=True)
     image = fields.String(required=True)
     latitude = fields.Float(required=True)
     longitude = fields.Float(required=True)
     name = fields.String(required=True)
-    phone = fields.String(required=True, allow_none=True)
-    photos = fields.List(fields.String(), required=True)
     price_levels = fields.List(fields.String(), required=True)
     rating = fields.Float(required=True)
     rating_histogram = fields.List(fields.Integer(), required=True)
-    raw_ranking = fields.Float(required=True)
+    raw_ranking = fields.Float(required=True, load_only=True)
     street = fields.String(required=True)
-    type = fields.Constant('HOTEL', dump_only=True)
-    website = fields.String(required=True, allow_none=True)
-
-    # Specific fields
-    ai_reviews_summary = fields.String(required=True)
-    description = fields.String(required=True, allow_none=True)
-    features = fields.List(fields.String(), required=True)
-    hotel_class = fields.String(required=True)
-    number_of_rooms = fields.Integer(required=True)
+    type = fields.String(dump_only=True)
 
     @validates('rating')
     def validate_rating(self, value: float):
@@ -80,6 +72,20 @@ class HotelSchema(CamelCaseSchema):
             raise ValidationError('Raw ranking must be between 0 and 5')
         return value
 
+
+class HotelSchema(ShortHotelSchema):
+    # Common fields
+    phone = fields.String(required=True, allow_none=True)
+    photos = fields.List(fields.String(), required=True)
+    website = fields.String(required=True, allow_none=True)
+
+    # Specific fields
+    ai_reviews_summary = fields.String(required=True)
+    description = fields.String(required=True, allow_none=True)
+    features = fields.List(fields.String(), required=True)
+    hotel_class = fields.String(required=True)
+    number_of_rooms = fields.Integer(required=True)
+
     @validates('number_of_rooms')
     def validate_number_of_rooms(self, value: int):
         if value <= 0:
@@ -89,8 +95,7 @@ class HotelSchema(CamelCaseSchema):
 
 @blueprint.post('/')
 def create_hotel():
-    schema = HotelSchema()
-    data = schema.load(request.json)
+    data = HotelSchema().load(request.json)
 
     # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
@@ -99,52 +104,52 @@ def create_hotel():
     result = execute_neo4j_query(
         """
         MATCH (c:City {postal_code: $postal_code})
-        CREATE (h:Hotel {
-            name: $name,
-            image: $image,
-            latitude: $latitude,
-            longitude: $longitude,
-            photos: $photos,
-            rating: $rating,
-            rating_histogram: $rating_histogram,
-            raw_ranking: $raw_ranking,
-            ai_reviews_summary: $ai_reviews_summary,
-            description: $description,
-            email: $email,
-            number_of_rooms: $number_of_rooms,
-            phone: $phone,
-            website: $website,
-            created_at: timestamp()
-        })
+        CREATE
+            (h:Hotel
+                {
+                    name: $name,
+                    image: $image,
+                    latitude: $latitude,
+                    longitude: $longitude,
+                    photos: $photos,
+                    rating: $rating,
+                    rating_histogram: $rating_histogram,
+                    raw_ranking: $raw_ranking,
+                    ai_reviews_summary: $ai_reviews_summary,
+                    description: $description,
+                    email: $email,
+                    number_of_rooms: $number_of_rooms,
+                    phone: $phone,
+                    type: 'HOTEL',
+                    website: $website,
+                    created_at:
+                        apoc.date.format(timestamp(), 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7')
+                })
         MERGE (h)-[:LOCATED_IN]->(c)
 
         // Handle features
-        WITH h, $features AS features
+        WITH h, c, $features AS features
         UNWIND features AS feature_name
         MERGE (a:Feature {name: feature_name})
         MERGE (h)-[:HAS_FEATURE]->(a)
 
         // Handle hotel_class
-        WITH h, $hotel_class AS hotel_class
+        WITH h, c, $hotel_class AS hotel_class
         MERGE (hc:HotelClass {name: hotel_class})
         MERGE (h)-[:BELONGS_TO_CLASS]->(hc)
 
         // Handle price_levels
-        WITH h, $price_levels AS price_levels
+        WITH h, c, $price_levels AS price_levels
         UNWIND price_levels AS price_level
         MERGE (pl:PriceLevel {level: price_level})
         MERGE (h)-[:HAS_PRICE_LEVEL]->(pl)
 
-        // Format created_at timestamp
-        WITH h, apoc.date.format(h.created_at, 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7') AS formatted_created_at
-        SET h.created_at = formatted_created_at
-
         // Return hotel with related data
-        RETURN h, elementId(h) AS element_id,
-               [(h)-[:HAS_FEATURE]->(a:Feature) | a.name] AS features,
-               [(h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel) | pl.level] AS price_levels,
-               [(h)-[:BELONGS_TO_CLASS]->(hc:HotelClass) | hc.name][0] AS hotel_class
-        ORDER BY features ASC, price_levels ASC
+        RETURN
+            h,
+            elementId(h) AS element_id,
+            [(h)-[:BELONGS_TO_CLASS]->(hc:HotelClass) | hc.name ][0] AS hotel_class,
+            c
         """,
         {
             'postal_code': city_postal_code,
@@ -171,22 +176,33 @@ def create_hotel():
     if not result:
         return {'error': 'Failed to create hotel.'}, 400
 
+    # Delete cached hotel data
+    redis = get_redis()
+    keys_to_delete = redis.keys('hotels:*')
+    if keys_to_delete:
+        redis.delete(*keys_to_delete)
+
     hotel = result[0]['h']
     hotel['element_id'] = result[0]['element_id']
-    hotel['features'] = result[0]['features']
-    hotel['price_levels'] = result[0]['price_levels']
-    hotel['hotel_class'] = result[0]['hotel_class']
-    return schema.dump(hotel), 201
+    hotel['city'] = result[0]['c']
+    return ShortHotelSchema().dump(hotel), 201
 
 
 @blueprint.get('/')
 def get_hotels():
-    # Get pagination parameters from the request
-    page = int(request.args.get('page', 1))
-    size = int(request.args.get('size', 10))
+    # Get query parameters for pagination
+    page = request.args.get('page', default=1, type=int)
+    size = request.args.get('size', default=10, type=int)
     offset = (page - 1) * size
 
-    # Query to get total count of hotels
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'hotels:page={page}:size={size}'
+    cached_response = redis.get(cache_key)
+    if cached_response:
+        return json.loads(cached_response), 200
+
+    # Get the total count of hotels
     total_count_result = execute_neo4j_query(
         """
         MATCH (h:Hotel)
@@ -195,12 +211,11 @@ def get_hotels():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Query to get paginated hotels
+    # Get the hotels with pagination
     result = execute_neo4j_query(
         """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)
-        RETURN h, elementId(h) AS element_id,
-               [(h)-[:BELONGS_TO_CLASS]->(hc:HotelClass) | hc.name][0] AS hotel_class
+        MATCH (h:Hotel)
+        RETURN h, elementId(h) AS element_id
         ORDER BY h.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -208,48 +223,18 @@ def get_hotels():
         {'offset': offset, 'size': size},
     )
 
-    # Return empty list if no hotels found
-    if not result:
-        return create_paging([], page, size, offset, total_count), 200
-
-    # Add the elementId and related data to each hotel
-    hotels = []
-    for record in result:
-        hotel = record['h']
-        hotel['element_id'] = record['element_id']
-        hotel['hotel_class'] = record['hotel_class']
-
-        # Get features and price levels
-        features_result = execute_neo4j_query(
-            """
-            MATCH (h:Hotel)-[:HAS_FEATURE]->(a:Feature)
-            WHERE elementId(h) = $hotel_id
-            RETURN a.name AS feature
-            """,
-            {'hotel_id': hotel['element_id']},
-        )
-        hotel['features'] = [record['feature'] for record in features_result]
-
-        price_levels_result = execute_neo4j_query(
-            """
-            MATCH (h:Hotel)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-            WHERE elementId(h) = $hotel_id
-            RETURN pl.level AS price_level
-            """,
-            {'hotel_id': hotel['element_id']},
-        )
-        hotel['price_levels'] = [
-            record['price_level'] for record in price_levels_result
-        ]
-        hotels.append(hotel)
-
     # Create paginated response
     response = create_paging(
-        data=HotelSchema(many=True).dump(hotels),
+        data=ShortHotelSchema(many=True).dump(
+            [record['h'] for record in result]
+        ),
         page=page,
         size=size,
         offset=offset,
         total_count=total_count,
     )
+
+    # Cache the response for 6 hours
+    redis.set(cache_key, json.dumps(response), ex=21600)
 
     return response, 200

@@ -54,3 +54,9 @@ def send_async_email(recipients: list[str], subject: str, html: str):
     # Start a new thread to send the email
     thread = Thread(target=send_email, args=(message,))
     thread.start()
+
+
+def get_redis():
+    from . import AppContext
+
+    return AppContext().get_redis()

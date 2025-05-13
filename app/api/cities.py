@@ -1,9 +1,12 @@
+import logging
+
 from flask import Blueprint, request
 from marshmallow import ValidationError, fields, validates
 
 from app.extensions import CamelCaseSchema
 from app.utils import create_paging, execute_neo4j_query
 
+logger = logging.getLogger(__name__)
 blueprint = Blueprint('cities', __name__, url_prefix='/cities')
 
 
@@ -24,30 +27,30 @@ class CitySchema(CamelCaseSchema):
 
 @blueprint.post('/')
 def create_city():
-    data = CitySchema().load(request.json)
+    schema = CitySchema()
+    data = schema.load(request.json)
     result = execute_neo4j_query(
         """
         MERGE (c:City {postal_code: $postal_code})
-        ON CREATE SET c.name = $name, c.created_at = timestamp()
-        WITH c, apoc.date.format(c.created_at, 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7') AS formatted_created_at
-        SET c.created_at = formatted_created_at
-        RETURN c, elementId(c) AS element_id
+        ON CREATE SET
+            c.name = $name,
+            c.created_at =
+                apoc.date.format(timestamp(), 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7')
+        RETURN c
         """,
         {
             'name': data['name'],
             'postal_code': data['postal_code'],
         },
     )
-    city = result[0]['c']
-    city['element_id'] = result[0]['element_id']
-    return CitySchema().dump(city), 201
+    return schema.dump(result[0]['c']), 201
 
 
 @blueprint.get('/')
 def get_cities():
     # Get pagination parameters from the request
-    page = int(request.args.get('page', 1))
-    size = int(request.args.get('size', 10))
+    page = request.args.get('page', default=1, type=int)
+    size = request.args.get('size', default=10, type=int)
     offset = (page - 1) * size
 
     # Query to get total count of cities
@@ -63,7 +66,7 @@ def get_cities():
     result = execute_neo4j_query(
         """
         MATCH (c:City)
-        RETURN c, elementId(c) AS element_id
+        RETURN c
         ORDER BY c.postal_code
         SKIP $offset
         LIMIT $size
@@ -71,16 +74,9 @@ def get_cities():
         {'offset': offset, 'size': size},
     )
 
-    # Add the elementId to each city
-    cities = []
-    for record in result:
-        city = record['c']
-        city['element_id'] = record['element_id']
-        cities.append(city)
-
     # Create paginated response
     response = create_paging(
-        data=CitySchema(many=True).dump(cities),
+        data=CitySchema(many=True).dump([record['c'] for record in result]),
         page=page,
         size=size,
         offset=offset,
@@ -95,7 +91,7 @@ def get_city_by_postal_code(postal_code):
     result = execute_neo4j_query(
         """
         MATCH (c:City {postal_code: $postal_code})
-        RETURN c, elementId(c) AS element_id
+        RETURN c
         """,
         {'postal_code': postal_code},
     )
@@ -103,9 +99,7 @@ def get_city_by_postal_code(postal_code):
     if not result:
         return {'error': 'City not found'}, 404
 
-    city = result[0]['c']
-    city['element_id'] = result[0]['element_id']
-    return CitySchema().dump(city), 200
+    return CitySchema().dump(result[0]['c']), 200
 
 
 @blueprint.put('/<string:postal_code>')
@@ -115,7 +109,7 @@ def update_city(postal_code):
         """
         MATCH (c:City {postal_code: $postal_code})
         SET c.name = $name
-        RETURN c, elementId(c) AS element_id
+        RETURN c
         """,
         {
             'postal_code': postal_code,
@@ -126,9 +120,7 @@ def update_city(postal_code):
     if not result:
         return {'error': 'City not found'}, 404
 
-    city = result[0]['c']
-    city['element_id'] = result[0]['element_id']
-    return CitySchema().dump(city), 200
+    return CitySchema().dump(result[0]['c']), 200
 
 
 @blueprint.delete('/<string:postal_code>')

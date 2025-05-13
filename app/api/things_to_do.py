@@ -1,13 +1,16 @@
+import logging
+
 from flask import Blueprint
 from marshmallow import ValidationError, fields, validates
 
 from app.extensions import CamelCaseSchema
 from app.utils import execute_neo4j_query
 
+logger = logging.getLogger(__name__)
 blueprint = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
 
 
-class CitySchema(CamelCaseSchema):
+class AttachCitySchema(CamelCaseSchema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
@@ -25,56 +28,4 @@ class CitySchema(CamelCaseSchema):
         )
         if not result:
             raise ValidationError('City with this postal code does not exist')
-        return value
-
-
-class ThingToDoSchema(CamelCaseSchema):
-    created_at = fields.String(dump_only=True)
-    element_id = fields.String(dump_only=True)
-
-    # Address
-    city = fields.Nested(CitySchema)
-
-    # Common fields
-    city = fields.Nested(CitySchema)
-    email = fields.Email(required=True, allow_none=True)
-    image = fields.String(required=True)
-    latitude = fields.Float(required=True)
-    longitude = fields.Float(required=True)
-    name = fields.String(required=True)
-    phone = fields.String(required=True, allow_none=True)
-    photos = fields.List(fields.String(), required=True)
-    price_levels = fields.List(fields.String(), required=True)
-    rating = fields.Float(required=True)
-    rating_histogram = fields.List(fields.Integer(), required=True)
-    raw_ranking = fields.Float(required=True)
-    street = fields.String(required=True)
-    type = fields.Constant('THING_TO_DO', dump_only=True)
-    website = fields.String(required=True, allow_none=True)
-
-    # Specific fields
-    # Not implemented yet
-
-    @validates('rating')
-    def validate_rating(self, value: float):
-        if value < 0 or value > 5:
-            raise ValidationError('Rating must be between 0 and 5')
-        return value
-
-    @validates('rating_histogram')
-    def validate_rating_histogram(self, value: list):
-        if len(value) != 5:
-            raise ValidationError(
-                'Rating histogram must contain exactly 5 integers'
-            )
-        if not all(isinstance(i, int) and i > 0 for i in value):
-            raise ValidationError(
-                'Rating histogram must be a list of 5 positive integers'
-            )
-        return value
-
-    @validates('raw_ranking')
-    def validate_raw_ranking(self, value: float):
-        if value < 0 or value > 5:
-            raise ValidationError('Raw ranking must be between 0 and 5')
         return value
