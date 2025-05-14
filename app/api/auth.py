@@ -50,7 +50,7 @@ class SignUpSchema(CamelCaseAutoSchema):
         return password
 
 
-@blueprint.post('/sign-up')
+@blueprint.post('/sign-up/')
 def sign_up():
     schema = SignUpSchema()
     user = schema.load(request.json)
@@ -71,7 +71,7 @@ class SignInResponseSchema(CamelCaseSchema):
     refresh_token = fields.String(required=True, dump_only=True)
 
 
-@blueprint.post('/sign-in')
+@blueprint.post('/sign-in/')
 def sign_in():
     data = SignInRequestSchema().load(request.json)
     user = db.session.execute(
@@ -94,7 +94,7 @@ class RefreshTokenResponseSchema(CamelCaseSchema):
     access_token = fields.String(required=True, dump_only=True)
 
 
-@blueprint.post('/refresh')
+@blueprint.post('/refresh/')
 @jwt_required(refresh=True)
 def refresh_token():
     identity = get_jwt_identity()
@@ -111,7 +111,7 @@ class MeSchema(CamelCaseSchema):
     full_name = fields.String(dump_only=True)
 
 
-@blueprint.get('/me')
+@blueprint.get('/me/')
 @jwt_required()
 def get_me():
     user_id = get_jwt_identity()
@@ -130,7 +130,7 @@ def get_me():
         select(User).filter_by(id=user_id)
     ).scalar_one_or_none()
     if type(user) is not User:
-        return {'message': 'User not found'}, 404
+        return {'error': 'User not found'}, 404
 
     # Cache the user data in Redis in 6 hours
     response = MeSchema().dump(user)

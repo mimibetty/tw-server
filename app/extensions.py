@@ -10,10 +10,9 @@ migrate = Migrate()
 
 # Flask-CORS
 cors = CORS(
-    max_age=86400,
     supports_credentials=True,
-    allow_headers=['Content-Type', 'Authorization'],
-    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    resources={r'/api/*': {'origins': '*'}},
+    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
 )
 
 # Flask-Marshmallow

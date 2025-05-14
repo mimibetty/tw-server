@@ -86,7 +86,7 @@ def get_cities():
     return response, 200
 
 
-@blueprint.get('/<string:postal_code>')
+@blueprint.get('/<string:postal_code>/')
 def get_city_by_postal_code(postal_code):
     result = execute_neo4j_query(
         """
@@ -97,12 +97,12 @@ def get_city_by_postal_code(postal_code):
     )
 
     if not result:
-        return {'message': 'City not found'}, 404
+        return {'error': 'City not found'}, 404
 
     return CitySchema().dump(result[0]['c']), 200
 
 
-@blueprint.put('/<string:postal_code>')
+@blueprint.put('/<postal_code>/')
 def update_city(postal_code):
     data = CitySchema().load(request.json)
     result = execute_neo4j_query(
@@ -118,12 +118,12 @@ def update_city(postal_code):
     )
 
     if not result:
-        return {'message': 'City not found'}, 404
+        return {'error': 'City not found'}, 404
 
     return CitySchema().dump(result[0]['c']), 200
 
 
-@blueprint.delete('/<string:postal_code>')
+@blueprint.delete('/<postal_code>/')
 def delete_city(postal_code):
     result = execute_neo4j_query(
         """
@@ -135,6 +135,6 @@ def delete_city(postal_code):
     )
 
     if not result or result[0]['deleted_count'] == 0:
-        return {'message': 'City not found'}, 404
+        return {'error': 'City not found'}, 404
 
     return 204

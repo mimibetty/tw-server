@@ -46,7 +46,7 @@ def get_conversation(conversation_id):
         select(UserConversation).filter_by(id=conversation_id, user_id=user_id)
     ).scalar_one_or_none()
     if type(user_conversation) is not UserConversation:
-        return {'message': 'Conversation not found'}, 404
+        return {'error': 'Conversation not found'}, 404
 
 
 @blueprint.post('/')
@@ -58,11 +58,13 @@ def create_message_in_conversation():
 @jwt_required()
 def delete_conversation(conversation_id: str):
     user_id = get_jwt_identity()
+
     user_conversation = db.session.execute(
         select(UserConversation).filter_by(id=conversation_id, user_id=user_id)
     ).scalar_one_or_none()
     if type(user_conversation) is not UserConversation:
-        return {'message': 'Conversation not found'}, 404
+        return {'error': 'Conversation not found'}, 404
+
     db.session.delete(user_conversation)
     db.session.commit()
     return 204

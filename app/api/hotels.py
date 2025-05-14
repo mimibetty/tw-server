@@ -47,8 +47,11 @@ class ShortHotelSchema(CamelCaseSchema):
         fields.Integer(), required=False, default=list
     )
     raw_ranking = fields.Float(required=True, load_only=True)
-    street = fields.String(required=False, allow_none=True)
+    street = fields.String(required=True, allow_none=True)
     type = fields.String(dump_only=True)
+
+    def on_bind_field(self, field_name, field_obj):
+        super().on_bind_field(field_name, field_obj)
 
     @validates('rating')
     def validate_rating(self, value: float):
@@ -140,8 +143,7 @@ class HotelSchema(ShortHotelSchema):
 
 @blueprint.post('/')
 def create_hotel():
-    schema = HotelSchema()
-    data = schema.load(request.json)
+    data = HotelSchema().load(request.json)
 
     # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
@@ -169,6 +171,7 @@ def create_hotel():
                 email: $email,
                 number_of_rooms: $number_of_rooms,
                 phone: $phone,
+                street: $street,
                 type: 'HOTEL',
                 website: $website,
                 price_range: $price_range,
@@ -235,11 +238,12 @@ def create_hotel():
             'hotel_class': data.get('hotel_class'),
             'price_range': data.get('price_range'),
             'features': features,
+            'street': data['street'],
         },
     )
 
     if not result:
-        return {'message': 'Failed to create hotel.'}, 400
+        return {'error': 'Failed to create hotel.'}, 400
 
     # Delete cached hotel data
     redis = get_redis()
@@ -255,7 +259,10 @@ def create_hotel():
     if data.get('hotel_class'):
         hotel['hotel_class'] = data['hotel_class']
 
-    return schema.dump(hotel), 201
+    # Add price_levels to the response
+    hotel['price_levels'] = price_levels
+
+    return ShortHotelSchema().dump(hotel), 201
 
 
 @blueprint.get('/')
@@ -284,11 +291,12 @@ def get_hotels():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the hotels with pagination
+    # Get the hotels with pagination and their price_levels
     result = execute_neo4j_query(
         """
         MATCH (h:Hotel)
-        RETURN h, elementId(h) AS element_id
+        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels
         ORDER BY h.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -296,10 +304,12 @@ def get_hotels():
         {'offset': offset, 'size': size},
     )
 
-    # Add element_id to each hotel record
+    # Add element_id and price_levels to each hotel record
     for record in result:
         record['h']['element_id'] = record['element_id']
+        record['h']['price_levels'] = record['price_levels']
         del record['element_id']
+        del record['price_levels']
 
     # Create paginated response
     response = create_paging(
@@ -321,19 +331,21 @@ def get_hotels():
     return response, 200
 
 
-@blueprint.get('/<hotel_id>')
+@blueprint.get('/<hotel_id>/')
 def get_hotel(hotel_id):
+    schema = HotelSchema()
+
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'hotels:{hotel_id}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            return schema.dump(json.loads(cached_response)), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the hotel details along with features, price_levels, and hotel_class
+    # Get the hotel details along with features, price_levels, hotel_class, and city
     result = execute_neo4j_query(
         """
         MATCH (h:Hotel)
@@ -341,24 +353,27 @@ def get_hotel(hotel_id):
         OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
         OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
         RETURN
             h,
             elementId(h) AS element_id,
             collect(DISTINCT f.name) AS features,
             collect(DISTINCT pl.level) AS price_levels,
-            hc.name AS hotel_class
+            hc.name AS hotel_class,
+            c AS city
         """,
         {'hotel_id': hotel_id},
     )
 
     if not result:
-        return {'message': 'Hotel not found'}, 404
+        return {'error': 'Hotel not found'}, 404
 
     hotel = result[0]['h']
     hotel['element_id'] = result[0]['element_id']
     hotel['features'] = result[0]['features']
     hotel['price_levels'] = result[0]['price_levels']
     hotel['hotel_class'] = result[0]['hotel_class']
+    hotel['city'] = result[0]['city']
 
     # Cache the response for 6 hours
     try:
@@ -366,4 +381,4 @@ def get_hotel(hotel_id):
     except Exception as e:
         logger.warning('Redis is not available to set data: %s', e)
 
-    return HotelSchema().dump(hotel), 200
+    return schema.dump(hotel), 200

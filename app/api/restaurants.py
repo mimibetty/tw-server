@@ -272,7 +272,7 @@ def create_restaurant():
     )
 
     if not result:
-        return {'message': 'Failed to create restaurant.'}, 400
+        return {'error': 'Failed to create restaurant.'}, 400
 
     # Delete cached restaurant data
     redis = get_redis()
@@ -382,7 +382,7 @@ def get_restaurant(restaurant_id):
     )
 
     if not result:
-        return {'message': 'Restaurant not found'}, 404
+        return {'error': 'Restaurant not found'}, 404
 
     restaurant = result[0]['r']
     restaurant['element_id'] = result[0]['element_id']

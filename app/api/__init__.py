@@ -25,7 +25,7 @@ blueprint.register_blueprint(things_to_do_blueprint)
 
 
 def unauthorized_handler(_):
-    return {'message': 'Unauthorized'}, 401
+    return {'error': 'Unauthorized'}, 401
 
 
 def validation_handler(error: ValidationError):
@@ -35,7 +35,7 @@ def validation_handler(error: ValidationError):
 def exception_handler(error):
     error_message = str(error)
     logger.error(f'Exception occurred: {error_message}')
-    return {'message': error_message}, 500
+    return {'error': error_message}, 500
 
 
 blueprint.register_error_handler(NoAuthorizationError, unauthorized_handler)

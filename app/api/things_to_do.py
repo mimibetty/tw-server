@@ -201,7 +201,7 @@ def create_thing_to_do():
     )
 
     if not result:
-        return {'message': 'Failed to create thing to do.'}, 400
+        return {'error': 'Failed to create thing to do.'}, 400
 
     # Delete cached thing to do data
     redis = get_redis()
@@ -324,7 +324,7 @@ def get_thing_to_do(thing_to_do_id):
     )
 
     if not result:
-        return {'message': 'Thing to do not found'}, 404
+        return {'error': 'Thing to do not found'}, 404
 
     thing_to_do = result[0]['t']
     thing_to_do['element_id'] = result[0]['element_id']
