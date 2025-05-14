@@ -124,6 +124,9 @@ class ThingToDoSchema(ShortThingToDoSchema):
     subtypes = fields.List(fields.String(), required=False, default=list)
     subcategories = fields.List(fields.String(), required=False, default=list)
 
+    def on_bind_field(self, field_name, field_obj):
+        super().on_bind_field(field_name, field_obj)
+
 
 @blueprint.post('/')
 def create_thing_to_do():
@@ -198,7 +201,7 @@ def create_thing_to_do():
     )
 
     if not result:
-        return {'error': 'Failed to create thing to do.'}, 400
+        return {'message': 'Failed to create thing to do.'}, 400
 
     # Delete cached thing to do data
     redis = get_redis()
@@ -224,9 +227,12 @@ def get_things_to_do():
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the total count of things to do
     total_count_result = execute_neo4j_query(
@@ -281,7 +287,10 @@ def get_things_to_do():
     )
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(response), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return response, 200
 
@@ -291,9 +300,12 @@ def get_thing_to_do(thing_to_do_id):
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'things-to-do:{thing_to_do_id}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the thing to do details along with subtypes, subcategories
     result = execute_neo4j_query(
@@ -312,7 +324,7 @@ def get_thing_to_do(thing_to_do_id):
     )
 
     if not result:
-        return {'error': 'Thing to do not found'}, 404
+        return {'message': 'Thing to do not found'}, 404
 
     thing_to_do = result[0]['t']
     thing_to_do['element_id'] = result[0]['element_id']
@@ -329,6 +341,9 @@ def get_thing_to_do(thing_to_do_id):
                 thing_to_do['rating'] = round(rating, 1)
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(thing_to_do), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(thing_to_do), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return ThingToDoSchema().dump(thing_to_do), 200

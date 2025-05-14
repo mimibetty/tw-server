@@ -128,6 +128,9 @@ class HotelSchema(ShortHotelSchema):
     number_of_rooms = fields.Integer(required=False)
     price_range = fields.String(required=False, allow_none=True)
 
+    def on_bind_field(self, field_name, field_obj):
+        super().on_bind_field(field_name, field_obj)
+
     @validates('number_of_rooms')
     def validate_number_of_rooms(self, value: int):
         if value is not None and value <= 0:
@@ -236,7 +239,7 @@ def create_hotel():
     )
 
     if not result:
-        return {'error': 'Failed to create hotel.'}, 400
+        return {'message': 'Failed to create hotel.'}, 400
 
     # Delete cached hotel data
     redis = get_redis()
@@ -265,9 +268,12 @@ def get_hotels():
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'hotels:page={page}:size={size}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the total count of hotels
     total_count_result = execute_neo4j_query(
@@ -307,7 +313,10 @@ def get_hotels():
     )
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(response), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return response, 200
 
@@ -317,9 +326,12 @@ def get_hotel(hotel_id):
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'hotels:{hotel_id}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the hotel details along with features, price_levels, and hotel_class
     result = execute_neo4j_query(
@@ -340,7 +352,7 @@ def get_hotel(hotel_id):
     )
 
     if not result:
-        return {'error': 'Hotel not found'}, 404
+        return {'message': 'Hotel not found'}, 404
 
     hotel = result[0]['h']
     hotel['element_id'] = result[0]['element_id']
@@ -349,6 +361,9 @@ def get_hotel(hotel_id):
     hotel['hotel_class'] = result[0]['hotel_class']
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(hotel), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(hotel), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return HotelSchema().dump(hotel), 200

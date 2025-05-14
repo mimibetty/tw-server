@@ -149,6 +149,9 @@ class RestaurantSchema(ShortRestaurantSchema):
     cuisines = fields.List(fields.String(), required=False, default=list)
     traveler_choice_award = fields.Boolean(required=False, default=False)
 
+    def on_bind_field(self, field_name, field_obj):
+        super().on_bind_field(field_name, field_obj)
+
 
 @blueprint.post('/')
 def create_restaurant():
@@ -269,7 +272,7 @@ def create_restaurant():
     )
 
     if not result:
-        return {'error': 'Failed to create restaurant.'}, 400
+        return {'message': 'Failed to create restaurant.'}, 400
 
     # Delete cached restaurant data
     redis = get_redis()
@@ -293,9 +296,12 @@ def get_restaurants():
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'restaurants:page={page}:size={size}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the total count of restaurants
     total_count_result = execute_neo4j_query(
@@ -335,7 +341,10 @@ def get_restaurants():
     )
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(response), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return response, 200
 
@@ -345,9 +354,12 @@ def get_restaurant(restaurant_id):
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'restaurants:{restaurant_id}'
-    cached_response = redis.get(cache_key)
-    if cached_response:
-        return json.loads(cached_response), 200
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return json.loads(cached_response), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
 
     # Get the restaurant details along with features, cuisines, price_levels, meal_types
     result = execute_neo4j_query(
@@ -370,7 +382,7 @@ def get_restaurant(restaurant_id):
     )
 
     if not result:
-        return {'error': 'Restaurant not found'}, 404
+        return {'message': 'Restaurant not found'}, 404
 
     restaurant = result[0]['r']
     restaurant['element_id'] = result[0]['element_id']
@@ -387,6 +399,9 @@ def get_restaurant(restaurant_id):
             restaurant['hours'] = None
 
     # Cache the response for 6 hours
-    redis.set(cache_key, json.dumps(restaurant), ex=21600)
+    try:
+        redis.set(cache_key, json.dumps(restaurant), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
 
     return RestaurantSchema().dump(restaurant), 200

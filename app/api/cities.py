@@ -97,7 +97,7 @@ def get_city_by_postal_code(postal_code):
     )
 
     if not result:
-        return {'error': 'City not found'}, 404
+        return {'message': 'City not found'}, 404
 
     return CitySchema().dump(result[0]['c']), 200
 
@@ -118,7 +118,7 @@ def update_city(postal_code):
     )
 
     if not result:
-        return {'error': 'City not found'}, 404
+        return {'message': 'City not found'}, 404
 
     return CitySchema().dump(result[0]['c']), 200
 
@@ -135,6 +135,6 @@ def delete_city(postal_code):
     )
 
     if not result or result[0]['deleted_count'] == 0:
-        return {'error': 'City not found'}, 404
+        return {'message': 'City not found'}, 404
 
     return 204

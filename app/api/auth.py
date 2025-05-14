@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 
 from flask import Blueprint, request
@@ -8,11 +10,14 @@ from flask_jwt_extended import (
     jwt_required,
 )
 from marshmallow import ValidationError, fields, validates
+from sqlalchemy import select
 from werkzeug.security import check_password_hash
 
 from app.extensions import CamelCaseAutoSchema, CamelCaseSchema
 from app.models import User, db
+from app.utils import get_redis
 
+logger = logging.getLogger(__name__)
 blueprint = Blueprint('auth', __name__, url_prefix='/auth')
 
 
@@ -28,7 +33,9 @@ class SignUpSchema(CamelCaseAutoSchema):
 
     @validates('email')
     def validate_email(self, email):
-        user = User.query.filter(User.email == email).first()
+        user = db.session.execute(
+            select(User).filter_by(email=email)
+        ).scalar_one_or_none()
         if user:
             raise ValidationError('Email already exists')
         return email
@@ -67,7 +74,9 @@ class SignInResponseSchema(CamelCaseSchema):
 @blueprint.post('/sign-in')
 def sign_in():
     data = SignInRequestSchema().load(request.json)
-    user = User.query.filter(User.email == data['email']).first()
+    user = db.session.execute(
+        select(User).filter_by(email=data['email'])
+    ).scalar_one_or_none()
     if type(user) is not User or not check_password_hash(
         user.password, data['password']
     ):
@@ -93,3 +102,41 @@ def refresh_token():
     return RefreshTokenResponseSchema().dump(
         {'access_token': access_token}
     ), 200
+
+
+# Me
+class MeSchema(CamelCaseSchema):
+    id = fields.UUID(dump_only=True)
+    avatar = fields.String(dump_only=True)
+    full_name = fields.String(dump_only=True)
+
+
+@blueprint.get('/me')
+@jwt_required()
+def get_me():
+    user_id = get_jwt_identity()
+
+    # Check if the result is cached
+    redis = get_redis()
+    redis_key = f'user:{user_id}'
+    try:
+        cached_user = redis.get(redis_key)
+        if cached_user:
+            return json.loads(cached_user), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    user = db.session.execute(
+        select(User).filter_by(id=user_id)
+    ).scalar_one_or_none()
+    if type(user) is not User:
+        return {'message': 'User not found'}, 404
+
+    # Cache the user data in Redis in 6 hours
+    response = MeSchema().dump(user)
+    try:
+        redis.set(redis_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return response, 200
