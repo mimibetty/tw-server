@@ -291,12 +291,13 @@ def get_hotels():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the hotels with pagination and their price_levels
+    # Get the hotels with pagination, their price_levels, and city
     result = execute_neo4j_query(
         """
         MATCH (h:Hotel)
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels
+        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
         ORDER BY h.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -304,12 +305,14 @@ def get_hotels():
         {'offset': offset, 'size': size},
     )
 
-    # Add element_id and price_levels to each hotel record
+    # Add element_id, price_levels, and city to each hotel record
     for record in result:
         record['h']['element_id'] = record['element_id']
         record['h']['price_levels'] = record['price_levels']
+        record['h']['city'] = record['city']
         del record['element_id']
         del record['price_levels']
+        del record['city']
 
     # Create paginated response
     response = create_paging(
