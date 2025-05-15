@@ -250,8 +250,8 @@ def get_trip_places(trip_id):
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
             
-        # Get places in trip, ordered by order
-        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+        # Get places in trip, ordered by created_at (newest first)
+        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.created_at.desc()).all()
         
         result = []
         for place in places:
@@ -365,8 +365,8 @@ def get_trip_with_place_details(trip_id):
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
             
-        # Get places in trip, ordered by order
-        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+        # Get places in trip, ordered by created_at (newest first)
+        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.created_at.desc()).all()
 
         if not places:
             # Return the trip without places
@@ -385,10 +385,11 @@ def get_trip_with_place_details(trip_id):
         for place in places:
             # Try to get place details from Neo4j
             place_info = get_place_details_from_neo4j(place.place_id)
-            # print(f"Place info: {place_info}")
+            
             if place_info:
-                # Add order to the place details
+                # Add trip-specific fields and use Trip's created_at
                 place_info['order'] = place.order
+                place_info['created_at'] = place.created_at.isoformat()
                 place_details.append(place_info)
         
         # Return trip with places details
@@ -429,12 +430,11 @@ def get_place_details_from_neo4j(place_id):
     place_types = result[0]['types']
     city_data = result[0]['c']
     
-    # Add city data if available
+    # Add city data if available (without created_at)
     if city_data:
         place_data['city'] = {
             'postal_code': city_data.get('postal_code', ''),
-            'name': city_data.get('name', ''),
-            'created_at': city_data.get('created_at', '')
+            'name': city_data.get('name', '')
         }
     
     # Determine place type and standardize it
@@ -494,11 +494,11 @@ def get_place_details_from_neo4j(place_id):
         if camel in place_data and snake not in place_data:
             place_data[snake] = place_data[camel]
     
-    # Filter fields to only include those from short schemas
+    # Filter fields to only include those from short schemas (excluding created_at which will be set from Trip)
     common_fields = [
-        'created_at', 'element_id', 'city', 'email', 'image', 
+        'element_id', 'city', 'email', 'image', 
         'latitude', 'longitude', 'name', 'rating', 'rating_histogram',
-        'raw_ranking', 'street', 'type', 'order'
+        'raw_ranking', 'street', 'type'
     ]
     
     # Create filtered dict with only fields from short schemas

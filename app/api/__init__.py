@@ -8,6 +8,7 @@ from marshmallow import ValidationError
 from .auth import blueprint as auth_blueprint
 from .cities import blueprint as cities_blueprint
 from .conversations import blueprint as conversations_blueprint
+from .favourites import blueprint as favourites_blueprint
 from .hotels import blueprint as hotels_blueprint
 from .restaurants import blueprint as restaurants_blueprint
 from .things_to_do import blueprint as things_to_do_blueprint
@@ -20,6 +21,7 @@ blueprint = Blueprint('api', __name__, url_prefix='/api')
 blueprint.register_blueprint(auth_blueprint)
 blueprint.register_blueprint(cities_blueprint)
 blueprint.register_blueprint(conversations_blueprint)
+blueprint.register_blueprint(favourites_blueprint)
 blueprint.register_blueprint(hotels_blueprint)
 blueprint.register_blueprint(restaurants_blueprint)
 blueprint.register_blueprint(things_to_do_blueprint)
