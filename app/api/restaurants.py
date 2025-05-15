@@ -349,7 +349,7 @@ def get_restaurants():
     return response, 200
 
 
-@blueprint.get('/<restaurant_id>/short-details/')
+@blueprint.get('/<restaurant_id>/short-details')
 def get_short_restaurant(restaurant_id):
     schema = ShortRestaurantSchema()
 
@@ -388,7 +388,7 @@ def get_short_restaurant(restaurant_id):
     return schema.dump(restaurant), 200
 
 
-@blueprint.get('/<restaurant_id>/details/')
+@blueprint.get('/<restaurant_id>/details')
 def get_restaurant(restaurant_id):
     schema = RestaurantSchema()
 

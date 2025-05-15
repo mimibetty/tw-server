@@ -334,7 +334,7 @@ def get_hotels():
     return response, 200
 
 
-@blueprint.get('/<hotel_id>/short-details/')
+@blueprint.get('/<hotel_id>/short-details')
 def get_short_hotel(hotel_id):
     schema = ShortHotelSchema()
 

@@ -295,7 +295,7 @@ def get_things_to_do():
     return response, 200
 
 
-@blueprint.get('/<thing_to_do_id>/short-details/')
+@blueprint.get('/<thing_to_do_id>/short-details')
 def get_short_thing_to_do(thing_to_do_id):
     schema = ShortThingToDoSchema()
 
@@ -334,7 +334,7 @@ def get_short_thing_to_do(thing_to_do_id):
     return schema.dump(thing_to_do), 200
 
 
-@blueprint.get('/<thing_to_do_id>/details/')
+@blueprint.get('/<thing_to_do_id>/details')
 def get_thing_to_do(thing_to_do_id):
     schema = ThingToDoSchema()
 
