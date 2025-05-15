@@ -80,9 +80,8 @@ def create_user_trip():
 def get_user_trips():
     """Get all user trips for the authenticated user."""
     user_id = get_jwt_identity()
-    
     try:
-        user_trips = UserTrip.query.filter_by(user_id=user_id).all()
+        user_trips = UserTrip.query.filter_by(user_id=user_id).order_by(UserTrip.created_at.desc()).all()
         
         result = []
         for trip in user_trips:
@@ -250,8 +249,8 @@ def get_trip_places(trip_id):
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
             
-        # Get places in trip, ordered by created_at (newest first)
-        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.created_at.desc()).all()
+        # Get places in trip, ordered by order field (ascending)
+        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
         
         result = []
         for place in places:
@@ -365,8 +364,8 @@ def get_trip_with_place_details(trip_id):
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
             
-        # Get places in trip, ordered by created_at (newest first)
-        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.created_at.desc()).all()
+        # Get places in trip, ordered by order field (ascending)
+        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
 
         if not places:
             # Return the trip without places
