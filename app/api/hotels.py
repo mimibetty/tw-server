@@ -334,7 +334,50 @@ def get_hotels():
     return response, 200
 
 
-@blueprint.get('/<hotel_id>/')
+@blueprint.get('/<hotel_id>/short-details/')
+def get_short_hotel(hotel_id):
+    schema = ShortHotelSchema()
+
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'hotels:short:{hotel_id}'
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return schema.dump(json.loads(cached_response)), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    # Get the hotel details along with features, price_levels, and city
+    result = execute_neo4j_query(
+        """
+        MATCH (h:Hotel)
+        WHERE elementId(h) = $hotel_id
+        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+        """,
+        {'hotel_id': hotel_id},
+    )
+
+    if not result:
+        return {'error': 'Hotel not found'}, 404
+
+    hotel = result[0]['h']
+    hotel['element_id'] = result[0]['element_id']
+    hotel['price_levels'] = result[0]['price_levels']
+    hotel['city'] = result[0]['city']
+
+    # Cache the response for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(hotel), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return schema.dump(hotel), 200
+
+
+@blueprint.get('/<hotel_id>/details')
 def get_hotel(hotel_id):
     schema = HotelSchema()
 

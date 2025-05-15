@@ -349,15 +349,56 @@ def get_restaurants():
     return response, 200
 
 
-@blueprint.get('/<restaurant_id>')
+@blueprint.get('/<restaurant_id>/short-details/')
+def get_short_restaurant(restaurant_id):
+    schema = ShortRestaurantSchema()
+
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'restaurants:short-details:{restaurant_id}'
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return schema.dump(json.loads(cached_response)), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    # Get the restaurant details
+    result = execute_neo4j_query(
+        """
+        MATCH (r:Restaurant)
+        WHERE elementId(r) = $restaurant_id
+        RETURN r, elementId(r) AS element_id
+        """,
+        {'restaurant_id': restaurant_id},
+    )
+
+    if not result:
+        return {'error': 'Restaurant not found'}, 404
+
+    restaurant = result[0]['r']
+    restaurant['element_id'] = result[0]['element_id']
+
+    # Cache the response for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(restaurant), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return schema.dump(restaurant), 200
+
+
+@blueprint.get('/<restaurant_id>/details/')
 def get_restaurant(restaurant_id):
+    schema = RestaurantSchema()
+
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'restaurants:{restaurant_id}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            return schema.dump(json.loads(cached_response)), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -404,4 +445,4 @@ def get_restaurant(restaurant_id):
     except Exception as e:
         logger.warning('Redis is not available to set data: %s', e)
 
-    return RestaurantSchema().dump(restaurant), 200
+    return schema.dump(restaurant), 200

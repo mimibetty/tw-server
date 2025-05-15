@@ -295,15 +295,56 @@ def get_things_to_do():
     return response, 200
 
 
-@blueprint.get('/<thing_to_do_id>')
+@blueprint.get('/<thing_to_do_id>/short-details/')
+def get_short_thing_to_do(thing_to_do_id):
+    schema = ShortThingToDoSchema()
+
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'things-to-do:short-details:{thing_to_do_id}'
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            return schema.dump(json.loads(cached_response)), 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    # Get the short details of the thing to do
+    result = execute_neo4j_query(
+        """
+        MATCH (t:ThingToDo)
+        WHERE elementId(t) = $thing_to_do_id
+        RETURN t, elementId(t) AS element_id
+        """,
+        {'thing_to_do_id': thing_to_do_id},
+    )
+
+    if not result:
+        return {'error': 'Thing to do not found'}, 404
+
+    thing_to_do = result[0]['t']
+    thing_to_do['element_id'] = result[0]['element_id']
+
+    # Cache the response for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(thing_to_do), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return schema.dump(thing_to_do), 200
+
+
+@blueprint.get('/<thing_to_do_id>/details/')
 def get_thing_to_do(thing_to_do_id):
+    schema = ThingToDoSchema()
+
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'things-to-do:{thing_to_do_id}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            return schema.dump(json.loads(cached_response)), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -346,4 +387,4 @@ def get_thing_to_do(thing_to_do_id):
     except Exception as e:
         logger.warning('Redis is not available to set data: %s', e)
 
-    return ThingToDoSchema().dump(thing_to_do), 200
+    return schema.dump(thing_to_do), 200
