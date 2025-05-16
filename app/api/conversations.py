@@ -1,13 +1,13 @@
 import logging
+import time
 
-from flask import Blueprint
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask import Blueprint, Response, request
 from google import genai
-from sqlalchemy import select
+from google.genai import types
+from marshmallow import fields
 
 from app.environments import GEMINI_API_KEY
-from app.extensions import CamelCaseAutoSchema
-from app.models import UserConversation, db
+from app.extensions import CamelCaseSchema
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('conversations', __name__, url_prefix='/conversations')
@@ -16,55 +16,32 @@ blueprint = Blueprint('conversations', __name__, url_prefix='/conversations')
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-class UserConversationSchema(CamelCaseAutoSchema):
-    class Meta:
-        model = UserConversation
-        load_instance = True
+class RequestMessageSchema(CamelCaseSchema):
+    message = fields.Str(required=True, validate=lambda x: len(x) > 0)
 
 
-@blueprint.get('/')
-@jwt_required()
-def get_conversations():
-    user_id = get_jwt_identity()
-    user_conversations = db.session.execute(
-        select(UserConversation).filter_by(user_id=user_id)
-    ).scalars()
-    return UserConversationSchema(many=True).dump(user_conversations)
-
-
-class ConversationMessageSchema(CamelCaseAutoSchema):
-    class Meta:
-        model = UserConversation
-        load_instance = True
-
-
-@blueprint.get('/<conversation_id>')
-@jwt_required()
-def get_conversation(conversation_id):
-    user_id = get_jwt_identity()
-    user_conversation = db.session.execute(
-        select(UserConversation).filter_by(id=conversation_id, user_id=user_id)
-    ).scalar_one_or_none()
-    if type(user_conversation) is not UserConversation:
-        return {'error': 'Conversation not found'}, 404
+def generate_stream(contents):
+    for chunk in client.models.generate_content_stream(
+        model='gemini-2.0-flash',
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction="You are a friendly and knowledgeable assistant for a website dedicated to tourism in Da Nang - Quang Nam, Vietnam. Provide accurate, engaging, and concise answers about attractions, culture, cuisine, and travel tips, using a warm, welcoming tone to inspire excitement about visiting. If a question is unrelated to Da Nang or tourism, respond with: 'That question seems outside my focus on Da Nang - Quang Nam tourism.' If unsure about a relevant question, suggest checking with local resources or the website for more details.",
+            temperature=1,
+            safety_settings=[
+                types.SafetySetting(
+                    category='HARM_CATEGORY_HATE_SPEECH',
+                    threshold='BLOCK_ONLY_HIGH',
+                )
+            ],
+        ),
+    ):
+        yield chunk.text
+        time.sleep(0.1)
 
 
 @blueprint.post('/')
-def create_message_in_conversation():
-    pass
-
-
-@blueprint.delete('/<conversation_id>')
-@jwt_required()
-def delete_conversation(conversation_id: str):
-    user_id = get_jwt_identity()
-
-    user_conversation = db.session.execute(
-        select(UserConversation).filter_by(id=conversation_id, user_id=user_id)
-    ).scalar_one_or_none()
-    if type(user_conversation) is not UserConversation:
-        return {'error': 'Conversation not found'}, 404
-
-    db.session.delete(user_conversation)
-    db.session.commit()
-    return 204
+def request_message():
+    data = RequestMessageSchema().load(request.json)
+    return Response(
+        generate_stream(data['message']), mimetype='text/event-stream'
+    )

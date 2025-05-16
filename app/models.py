@@ -111,31 +111,3 @@ class Trip(BaseModel):
     user_trip: Mapped[UserTrip] = relationship(
         'UserTrip', backref='trips', foreign_keys=[trip_id]
     )
-
-
-class UserConversation(BaseModel):
-    __tablename__ = 'user_conversations'
-
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('users.id'), nullable=False
-    )
-
-    # Relationships
-    user: Mapped[User] = relationship(
-        'User', backref='user_conversations', foreign_keys=[user_id]
-    )
-
-
-class ConversationMessage(BaseModel):
-    __tablename__ = 'conversation_messages'
-
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('user_conversations.id'), nullable=False
-    )
-    user_message: Mapped[str] = mapped_column(nullable=False)
-    model_message: Mapped[str] = mapped_column(nullable=True)
-
-    # Relationships
-    user_conversation: Mapped[UserConversation] = relationship(
-        'UserConversation', backref='messages', foreign_keys=[conversation_id]
-    )
