@@ -43,7 +43,7 @@ def exception_handler(error):
 
 
 blueprint.register_error_handler(NoAuthorizationError, unauthorized_handler)
-blueprint.register_error_handler(ExpiredSignatureError, exception_handler)
-blueprint.register_error_handler(InvalidSignatureError, exception_handler)
+blueprint.register_error_handler(ExpiredSignatureError, unauthorized_handler)
+blueprint.register_error_handler(InvalidSignatureError, unauthorized_handler)
 blueprint.register_error_handler(ValidationError, validation_handler)
 blueprint.register_error_handler(Exception, exception_handler)
