@@ -1,5 +1,8 @@
 import json
 import logging
+import requests
+import uuid
+from datetime import datetime
 
 from flask import Blueprint, request
 from marshmallow import ValidationError, fields, pre_load, validates
@@ -428,3 +431,23 @@ def get_hotel(hotel_id):
         logger.warning('Redis is not available to set data: %s', e)
 
     return schema.dump(hotel), 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

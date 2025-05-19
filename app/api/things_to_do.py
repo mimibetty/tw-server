@@ -249,8 +249,9 @@ def get_things_to_do():
         MATCH (t:ThingToDo)
         OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
-        WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories
-        RETURN t, elementId(t) AS element_id, subtypes, subcategories
+        OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
+        WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories, c
+        RETURN t, elementId(t) AS element_id, subtypes, subcategories, c AS city
         ORDER BY t.raw_ranking {sort_order}
         SKIP $offset
         LIMIT $size
@@ -265,6 +266,8 @@ def get_things_to_do():
         thing['element_id'] = record['element_id']
         thing['subtypes'] = record['subtypes']
         thing['subcategories'] = record['subcategories']
+        if record['city']:
+            thing['city'] = record['city']
 
         # Calculate rating if not present
         if 'rating' not in thing or thing['rating'] is None:
@@ -314,7 +317,8 @@ def get_short_thing_to_do(thing_to_do_id):
         """
         MATCH (t:ThingToDo)
         WHERE elementId(t) = $thing_to_do_id
-        RETURN t, elementId(t) AS element_id
+        OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
+        RETURN t, elementId(t) AS element_id, c AS city
         """,
         {'thing_to_do_id': thing_to_do_id},
     )
@@ -324,6 +328,8 @@ def get_short_thing_to_do(thing_to_do_id):
 
     thing_to_do = result[0]['t']
     thing_to_do['element_id'] = result[0]['element_id']
+    if result[0]['city']:
+        thing_to_do['city'] = result[0]['city']
 
     # Cache the response for 6 hours
     try:
@@ -355,11 +361,13 @@ def get_thing_to_do(thing_to_do_id):
         WHERE elementId(t) = $thing_to_do_id
         OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
+        OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
         RETURN
             t,
             elementId(t) AS element_id,
             collect(DISTINCT st.name) AS subtypes,
-            collect(DISTINCT sc.name) AS subcategories
+            collect(DISTINCT sc.name) AS subcategories,
+            c AS city
         """,
         {'thing_to_do_id': thing_to_do_id},
     )
@@ -371,6 +379,8 @@ def get_thing_to_do(thing_to_do_id):
     thing_to_do['element_id'] = result[0]['element_id']
     thing_to_do['subtypes'] = result[0]['subtypes']
     thing_to_do['subcategories'] = result[0]['subcategories']
+    if result[0]['city']:
+        thing_to_do['city'] = result[0]['city']
 
     # Calculate rating if not present
     if 'rating' not in thing_to_do or thing_to_do['rating'] is None:

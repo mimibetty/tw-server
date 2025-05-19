@@ -189,6 +189,7 @@ def create_restaurant():
                 dishes: $dishes,
                 dietary_restrictions: $dietary_restrictions,
                 traveler_choice_award: $traveler_choice_award,
+                street: $street,
                 type: 'RESTAURANT',
                 created_at:
                     apoc.date.format(timestamp(), 'ms', 'yyyy-MM-dd HH:mm', 'GMT+7')
@@ -268,6 +269,7 @@ def create_restaurant():
             'meal_types': meal_types,
             'cuisines': cuisines,
             'traveler_choice_award': data.get('traveler_choice_award', False),
+            'street': data.get('street'),
         },
     )
 
@@ -312,11 +314,13 @@ def get_restaurants():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the restaurants with pagination
+    # Get the restaurants with pagination, their price_levels, and city
     result = execute_neo4j_query(
         """
         MATCH (r:Restaurant)
-        RETURN r, elementId(r) AS element_id
+        OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
+        RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
         ORDER BY r.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -324,10 +328,15 @@ def get_restaurants():
         {'offset': offset, 'size': size},
     )
 
-    # Add element_id to each restaurant record
+    # Add element_id, price_levels, and city to each restaurant record
     for record in result:
         record['r']['element_id'] = record['element_id']
+        record['r']['price_levels'] = record['price_levels']
+        if record['city']:
+            record['r']['city'] = record['city']
         del record['element_id']
+        del record['price_levels']
+        del record['city']
 
     # Create paginated response
     response = create_paging(
@@ -363,12 +372,14 @@ def get_short_restaurant(restaurant_id):
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the restaurant details
+    # Get the restaurant details along with price_levels and city
     result = execute_neo4j_query(
         """
         MATCH (r:Restaurant)
         WHERE elementId(r) = $restaurant_id
-        RETURN r, elementId(r) AS element_id
+        OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
+        RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
         """,
         {'restaurant_id': restaurant_id},
     )
@@ -378,6 +389,9 @@ def get_short_restaurant(restaurant_id):
 
     restaurant = result[0]['r']
     restaurant['element_id'] = result[0]['element_id']
+    restaurant['price_levels'] = result[0]['price_levels']
+    if result[0]['city']:
+        restaurant['city'] = result[0]['city']
 
     # Cache the response for 6 hours
     try:

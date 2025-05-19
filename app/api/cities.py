@@ -138,3 +138,205 @@ def delete_city(postal_code):
         return {'error': 'City not found'}, 404
 
     return 204
+
+
+@blueprint.delete('/<postal_code>/children')
+def delete_city_children(postal_code):
+    """
+    Delete all nodes connected to a city (hotels, restaurants, attractions, etc.)
+    but keep the city node itself.
+    """
+    # First check if city exists
+    city_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        RETURN c
+        """,
+        {'postal_code': postal_code},
+    )
+
+    if not city_result:
+        return {'error': 'City not found'}, 404
+        
+    # Delete all relationships and connected nodes
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (n)-[r:LOCATED_IN]->(c)
+        WITH n, r
+        WHERE n IS NOT NULL
+        DETACH DELETE n
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    # Get statistics about deleted nodes
+    stats_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (connected_node)-[:LOCATED_IN]->(c)
+        RETURN count(connected_node) AS remaining_nodes
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    remaining = stats_result[0]['remaining_nodes']
+    
+    # Clear any orphaned nodes that might be connected to the deleted nodes
+    cleanup_result = execute_neo4j_query(
+        """
+        MATCH (orphan)
+        WHERE NOT (orphan)-[]-() AND NOT orphan:City
+        DELETE orphan
+        """,
+    )
+    
+    return {
+        'message': 'Successfully deleted all nodes connected to the city',
+        'postal_code': postal_code,
+        'remaining_connected_nodes': remaining,
+    }, 200
+
+
+@blueprint.delete('/<postal_code>/hotels')
+def delete_city_hotels(postal_code):
+    """
+    Delete all hotel nodes connected to a city but keep other nodes.
+    """
+    # First check if city exists
+    city_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        RETURN c
+        """,
+        {'postal_code': postal_code},
+    )
+
+    if not city_result:
+        return {'error': 'City not found'}, 404
+        
+    # Delete all hotel nodes and their relationships
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (h:Hotel)-[r:LOCATED_IN]->(c)
+        WITH h, r
+        WHERE h IS NOT NULL
+        DETACH DELETE h
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    # Get statistics about remaining hotel nodes
+    stats_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (h:Hotel)-[:LOCATED_IN]->(c)
+        RETURN count(h) AS remaining_hotels
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    remaining = stats_result[0]['remaining_hotels']
+    
+    return {
+        'message': 'Successfully deleted all hotel nodes connected to the city',
+        'postal_code': postal_code,
+        'remaining_hotels': remaining,
+    }, 200
+
+
+@blueprint.delete('/<postal_code>/restaurants')
+def delete_city_restaurants(postal_code):
+    """
+    Delete all restaurant nodes connected to a city but keep other nodes.
+    """
+    # First check if city exists
+    city_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        RETURN c
+        """,
+        {'postal_code': postal_code},
+    )
+
+    if not city_result:
+        return {'error': 'City not found'}, 404
+        
+    # Delete all restaurant nodes and their relationships
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (r:Restaurant)-[rel:LOCATED_IN]->(c)
+        WITH r, rel
+        WHERE r IS NOT NULL
+        DETACH DELETE r
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    # Get statistics about remaining restaurant nodes
+    stats_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (r:Restaurant)-[:LOCATED_IN]->(c)
+        RETURN count(r) AS remaining_restaurants
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    remaining = stats_result[0]['remaining_restaurants']
+    
+    return {
+        'message': 'Successfully deleted all restaurant nodes connected to the city',
+        'postal_code': postal_code,
+        'remaining_restaurants': remaining,
+    }, 200
+
+
+@blueprint.delete('/<postal_code>/things-to-do')
+def delete_city_things_to_do(postal_code):
+    """
+    Delete all things-to-do nodes connected to a city but keep other nodes.
+    """
+    # First check if city exists
+    city_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        RETURN c
+        """,
+        {'postal_code': postal_code},
+    )
+
+    if not city_result:
+        return {'error': 'City not found'}, 404
+        
+    # Delete all things-to-do nodes and their relationships
+    result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (t:ThingToDo)-[r:LOCATED_IN]->(c)
+        WITH t, r
+        WHERE t IS NOT NULL
+        DETACH DELETE t
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    # Get statistics about remaining things-to-do nodes
+    stats_result = execute_neo4j_query(
+        """
+        MATCH (c:City {postal_code: $postal_code})
+        OPTIONAL MATCH (t:ThingToDo)-[:LOCATED_IN]->(c)
+        RETURN count(t) AS remaining_things_to_do
+        """,
+        {'postal_code': postal_code},
+    )
+    
+    remaining = stats_result[0]['remaining_things_to_do']
+    
+    return {
+        'message': 'Successfully deleted all things-to-do nodes connected to the city',
+        'postal_code': postal_code,
+        'remaining_things_to_do': remaining,
+    }, 200
