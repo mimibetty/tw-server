@@ -312,11 +312,11 @@ def get_restaurants():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the restaurants with pagination
+    # Get the restaurants with pagination, including city
     result = execute_neo4j_query(
         """
-        MATCH (r:Restaurant)
-        RETURN r, elementId(r) AS element_id
+        MATCH (r:Restaurant)-[:LOCATED_IN]->(c:City)
+        RETURN r, elementId(r) AS element_id, c
         ORDER BY r.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -324,10 +324,12 @@ def get_restaurants():
         {'offset': offset, 'size': size},
     )
 
-    # Add element_id to each restaurant record
+    # Add element_id and city to each restaurant record
     for record in result:
         record['r']['element_id'] = record['element_id']
+        record['r']['city'] = record['c']
         del record['element_id']
+        del record['c']
 
     # Create paginated response
     response = create_paging(

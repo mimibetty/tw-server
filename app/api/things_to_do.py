@@ -243,14 +243,14 @@ def get_things_to_do():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the things to do with pagination
+    # Get the things to do with pagination, including city
     result = execute_neo4j_query(
         f"""
-        MATCH (t:ThingToDo)
+        MATCH (t:ThingToDo)-[:LOCATED_IN]->(c:City)
         OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
-        WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories
-        RETURN t, elementId(t) AS element_id, subtypes, subcategories
+        WITH t, c, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories
+        RETURN t, elementId(t) AS element_id, c, subtypes, subcategories
         ORDER BY t.raw_ranking {sort_order}
         SKIP $offset
         LIMIT $size
@@ -265,6 +265,7 @@ def get_things_to_do():
         thing['element_id'] = record['element_id']
         thing['subtypes'] = record['subtypes']
         thing['subcategories'] = record['subcategories']
+        thing['city'] = record['c']
 
         # Calculate rating if not present
         if 'rating' not in thing or thing['rating'] is None:
