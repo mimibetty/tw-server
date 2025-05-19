@@ -30,7 +30,8 @@ def generate_stream(contents):
         model='gemini-2.0-flash',
         contents=contents,
         config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION, temperature=0.9
+            # system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.9,
         ),
     ):
         yield chunk.text

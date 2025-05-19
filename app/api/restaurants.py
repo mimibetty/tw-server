@@ -416,7 +416,7 @@ def get_restaurant(restaurant_id):
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the restaurant details along with features, cuisines, price_levels, meal_types
+    # Get the restaurant details along with features, cuisines, price_levels, meal_types, and city
     result = execute_neo4j_query(
         """
         MATCH (r:Restaurant)
@@ -425,13 +425,15 @@ def get_restaurant(restaurant_id):
         OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
         OPTIONAL MATCH (r)-[:HAS_CUISINE]->(cu:Cuisine)
         OPTIONAL MATCH (r)-[:SERVES_MEAL]->(mt:MealType)
+        OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
         RETURN
             r,
             elementId(r) AS element_id,
             collect(DISTINCT f.name) AS features,
             collect(DISTINCT pl.level) AS price_levels,
             collect(DISTINCT cu.name) AS cuisines,
-            collect(DISTINCT mt.name) AS meal_types
+            collect(DISTINCT mt.name) AS meal_types,
+            c AS city
         """,
         {'restaurant_id': restaurant_id},
     )
@@ -445,6 +447,8 @@ def get_restaurant(restaurant_id):
     restaurant['price_levels'] = result[0]['price_levels']
     restaurant['cuisines'] = result[0]['cuisines']
     restaurant['meal_types'] = result[0]['meal_types']
+    if result[0]['city']:
+        restaurant['city'] = result[0]['city']
 
     # Parse hours JSON if stored as string
     if 'hours' in restaurant and isinstance(restaurant['hours'], str):

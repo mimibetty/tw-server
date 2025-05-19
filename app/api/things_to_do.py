@@ -282,7 +282,7 @@ def get_things_to_do():
 
     # Create paginated response
     response = create_paging(
-        data=ThingToDoSchema(many=True).dump(processed_results),
+        data=ShortThingToDoSchema(many=True).dump(processed_results),
         page=page,
         size=size,
         offset=offset,
