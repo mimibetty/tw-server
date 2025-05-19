@@ -109,6 +109,7 @@ class MeSchema(CamelCaseSchema):
     id = fields.UUID(dump_only=True)
     avatar = fields.String(dump_only=True)
     full_name = fields.String(dump_only=True)
+    is_admin = fields.Boolean(dump_only=True)
 
 
 @blueprint.get('/me/')

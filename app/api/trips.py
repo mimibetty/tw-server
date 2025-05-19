@@ -53,7 +53,7 @@ def create_user_trip():
 
     try:
         # Create new user trip
-        user_trip = UserTrip(user_id=user_id, name=data['name'])
+        user_trip = UserTrip(user_id=user_id, name=data['name'].strip())
 
         db.session.add(user_trip)
         db.session.commit()

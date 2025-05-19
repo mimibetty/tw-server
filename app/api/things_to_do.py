@@ -243,10 +243,10 @@ def get_things_to_do():
     )
     total_count = total_count_result[0]['total_count']
 
-    # Get the things to do with pagination
+    # Get the things to do with pagination, including city
     result = execute_neo4j_query(
         f"""
-        MATCH (t:ThingToDo)
+        MATCH (t:ThingToDo)-[:LOCATED_IN]->(c:City)
         OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
         OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
