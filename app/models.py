@@ -91,6 +91,7 @@ class UserTrip(BaseModel):
         ForeignKey('users.id'), nullable=False
     )
     name: Mapped[str] = mapped_column(nullable=False)
+    is_optimized: Mapped[bool] = mapped_column(default=False)
 
     # Relationships
     user: Mapped[User] = relationship(
