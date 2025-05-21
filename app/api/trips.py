@@ -115,7 +115,7 @@ def get_user_trips():
         return jsonify({'error': 'Failed to fetch user trips'}), 500
 
 
-@blueprint.post('/<uuid:trip_id>/places')
+@blueprint.post('/<uuid:trip_id>')
 @jwt_required()
 def add_place_to_trip(trip_id):
     """Add a place to a user trip."""
@@ -246,39 +246,8 @@ def update_user_trip(trip_id):
 
 @blueprint.get('/<uuid:trip_id>')
 @jwt_required()
-def get_user_trip(trip_id):
-    """Get a specific user trip by ID."""
-    user_id = get_jwt_identity()
-
-    try:
-        user_trip = UserTrip.query.filter_by(
-            id=trip_id, user_id=user_id
-        ).first()
-
-        if not user_trip:
-            return jsonify({'error': 'Trip not found'}), 404
-
-        result = {
-            'id': str(user_trip.id),
-            'name': user_trip.name,
-            'created_at': user_trip.created_at.isoformat(),
-            'updated_at': user_trip.updated_at.isoformat(),
-        }
-
-        return jsonify(result), 200
-
-    except SQLAlchemyError as e:
-        logger.error(f'Error fetching user trip: {str(e)}')
-        return jsonify({'error': 'Failed to fetch user trip'}), 500
-
-
-# ===== Trip Places Endpoints =====
-
-
-@blueprint.get('/<uuid:trip_id>/places')
-@jwt_required()
 def get_trip_places(trip_id):
-    """Get all places in a user trip."""
+    """Get all places in a user trip with trip information."""
     user_id = get_jwt_identity()
 
     try:
@@ -295,17 +264,40 @@ def get_trip_places(trip_id):
             Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
         )
 
-        result = []
-        for place in places:
-            result.append(
-                {
-                    'id': str(place.id),
-                    'place_id': place.place_id,
-                    'order': place.order,
-                    'created_at': place.created_at.isoformat(),
-                    'updated_at': place.updated_at.isoformat(),
-                }
-            )
+        # Get place details from Neo4j
+        place_details = []
+        total_distance = None
+        total_distance_km = None
+
+        if places:
+            for place in places:
+                # Try to get place details from Neo4j
+                place_info = get_place_details_from_neo4j(place.place_id)
+                if place_info:
+                    place_info['order'] = place.order
+                    place_info['createdAt'] = place.created_at.isoformat()
+                    place_details.append(place_info)
+
+            # Calculate total distance if trip is optimized
+            if user_trip.is_optimized and len(place_details) >= 2:
+                distance_matrix = calculate_distance_matrix(place_details)
+                total_distance = calculate_total_distance(range(len(place_details)), distance_matrix)
+                total_distance_km = round(total_distance / 1000, 2)
+
+        result = {
+            'trip': {
+                'id': str(user_trip.id),
+                'name': user_trip.name,
+                'isOptimized': user_trip.is_optimized,
+                'createdAt': user_trip.created_at.isoformat(),
+                'updatedAt': user_trip.updated_at.isoformat(),
+                'userId': str(user_trip.user_id),
+                'totalPlaces': len(place_details),
+                'totalDistance': total_distance,
+                'totalDistanceKm': total_distance_km
+            },
+            'places': place_details
+        }
 
         return jsonify(result), 200
 
@@ -417,67 +409,6 @@ def reorder_trip_places(trip_id):
         logger.error(f'Error reordering trip places: {str(e)}')
         return jsonify({'error': 'Failed to reorder trip places'}), 500
 
-
-@blueprint.get('/<uuid:trip_id>/details')
-@jwt_required()
-def get_trip_with_place_details(trip_id):
-    """Get a trip with detailed information about all places."""
-    user_id = get_jwt_identity()
-
-    try:
-        # Verify trip exists and belongs to user
-        user_trip = UserTrip.query.filter_by(
-            id=trip_id, user_id=user_id
-        ).first()
-
-        if not user_trip:
-            return jsonify({'error': 'Trip not found'}), 404
-
-        # Get places in trip, ordered by order field (ascending)
-        places = (
-            Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
-        )
-
-        if not places:
-            # Return the trip without places
-            trip_data = {
-                'id': str(user_trip.id),
-                'name': user_trip.name,
-                'isOptimized': user_trip.is_optimized,
-                'createdAt': user_trip.created_at.isoformat(),
-                'updatedAt': user_trip.updated_at.isoformat(),
-                'places': [],
-            }
-            return TripDetailsSchema().dump(trip_data), 200
-
-        # Get place details from Neo4j
-        place_details = []
-
-        for place in places:
-            # Try to get place details from Neo4j
-            place_info = get_place_details_from_neo4j(place.place_id)
-
-            if place_info:
-                # Add trip-specific fields and use Trip's created_at
-                place_info['order'] = place.order
-                place_info['createdAt'] = place.created_at.isoformat()
-                place_details.append(place_info)
-
-        # Return trip with places details
-        trip_data = {
-            'id': str(user_trip.id),
-            'name': user_trip.name,
-            'isOptimized': user_trip.is_optimized,
-            'createdAt': user_trip.created_at.isoformat(),
-            'updatedAt': user_trip.updated_at.isoformat(),
-            'places': place_details,
-        }
-
-        return TripDetailsSchema().dump(trip_data), 200
-
-    except SQLAlchemyError as e:
-        logger.error(f'Error fetching trip details: {str(e)}')
-        return jsonify({'error': 'Failed to fetch trip details'}), 500
 
 
 def get_place_details_from_neo4j(place_id):
@@ -690,13 +621,13 @@ def solve_tsp(distance_matrix):
     node_index = manager.IndexToNode(index)
     route.append(node_index)
     
-    print(f"TSP route before processing: {route}")
+    # print(f"TSP route before processing: {route}")
     
     # Remove the duplicate starting point if it exists
     if len(route) > 1 and route[0] == route[-1]:
         route = route[:-1]
     
-    print(f"TSP route after removing duplicate: {route}")
+    # print(f"TSP route after removing duplicate: {route}")
     
     return route
 
@@ -751,19 +682,19 @@ def optimize_trip(trip_id):
         # Calculate total distance
         total_distance = calculate_total_distance(optimized_route, distance_matrix)
 
-        print(f"Optimized route: {optimized_route}")
+        # print(f"Optimized route: {optimized_route}")
 
         # First, reset all orders to 0
         for place in places:
             place.order = 0
-            print(f"Reset place {place.id} order to 0")
+            # print(f"Reset place {place.id} order to 0")
 
         # Update trip places order
         for i, place_index in enumerate(optimized_route):
             place = Trip.query.get(place_details[place_index]['trip_place_id'])
             if place:
                 place.order = i + 1  # Start from 1
-                print(f"Set place {place.id} order to {i + 1}")
+                # print(f"Set place {place.id} order to {i + 1}")
 
         # Update trip optimization status
         user_trip.is_optimized = True
@@ -778,16 +709,16 @@ def optimize_trip(trip_id):
             place_info = get_place_details_from_neo4j(place.place_id)
             if place_info:
                 place_info['order'] = place.order
-                print(f"Final place {place.id} order: {place.order}")
+                # print(f"Final place {place.id} order: {place.order}")
                 optimized_places.append(place_info)
 
         # Sort places by order to ensure correct sequence
         optimized_places.sort(key=lambda x: x['order'])
 
         # Print final orders for verification
-        print("Final orders:")
-        for place in optimized_places:
-            print(f"Place: {place['name']}, Order: {place['order']}")
+        # print("Final orders:")
+        # for place in optimized_places:
+        #     print(f"Place: {place['name']}, Order: {place['order']}")
 
         return jsonify({
             'message': 'Trip optimized successfully',
