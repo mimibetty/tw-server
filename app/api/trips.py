@@ -1,35 +1,38 @@
 import logging
-import uuid
 import math
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import fields
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import CamelCaseSchema
 from app.models import Trip, UserTrip, db
 from app.utils import execute_neo4j_query
-from ortools.constraint_solver import routing_enums_pb2
-from ortools.constraint_solver import pywrapcp
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('trips', __name__, url_prefix='/trips')
 
 
 # Add schema classes for trip responses
+class CitySchema(CamelCaseSchema):
+    name = fields.String(dump_only=True)
+    postal_code = fields.String(dump_only=True)
+
+
 class TripPlaceSchema(CamelCaseSchema):
-    created_at = fields.String(dump_only=True, data_key='createdAt')
-    element_id = fields.String(dump_only=True, data_key='elementId')
-    city = fields.Dict(dump_only=True)
+    city = fields.Nested(CitySchema, dump_only=True)
+    created_at = fields.String(dump_only=True)
+    element_id = fields.String(dump_only=True)
     email = fields.String(dump_only=True)
     image = fields.String(dump_only=True)
     latitude = fields.Float(dump_only=True)
     longitude = fields.Float(dump_only=True)
     name = fields.String(dump_only=True)
     rating = fields.Float(dump_only=True)
-    rating_histogram = fields.List(fields.Integer(), dump_only=True, data_key='ratingHistogram')
-    raw_ranking = fields.Float(dump_only=True, data_key='rawRanking')
+    rating_histogram = fields.List(fields.Integer(), dump_only=True)
+    raw_ranking = fields.Float(dump_only=True)
     street = fields.String(dump_only=True)
     type = fields.String(dump_only=True)
     order = fields.Integer(dump_only=True)
@@ -38,9 +41,9 @@ class TripPlaceSchema(CamelCaseSchema):
 class TripDetailsSchema(CamelCaseSchema):
     id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
-    created_at = fields.String(dump_only=True, data_key='createdAt')
-    updated_at = fields.String(dump_only=True, data_key='updatedAt')
-    is_optimized = fields.Boolean(dump_only=True, data_key='isOptimized')
+    created_at = fields.String(dump_only=True)
+    updated_at = fields.String(dump_only=True)
+    is_optimized = fields.Boolean(dump_only=True)
     places = fields.List(fields.Nested(TripPlaceSchema), dump_only=True)
 
 
@@ -58,9 +61,9 @@ def create_user_trip():
     try:
         # Create new user trip
         user_trip = UserTrip(
-            user_id=user_id, 
+            user_id=user_id,
             name=data['name'].strip(),
-            is_optimized=data.get('isOptimized', False)
+            is_optimized=data.get('isOptimized', False),
         )
 
         db.session.add(user_trip)
@@ -101,10 +104,10 @@ def get_user_trips():
                 {
                     'id': str(trip.id),
                     'name': trip.name,
-                    'created_at': trip.created_at.isoformat(),
-                    'updated_at': trip.updated_at.isoformat(),
-                    'place_count': len(trip.trips),
-                    'is_optimized': trip.is_optimized
+                    'createdAt': trip.created_at.isoformat(),
+                    'updatedAt': trip.updated_at.isoformat(),
+                    'placeCount': len(trip.trips),
+                    'isOptimized': trip.is_optimized,
                 }
             )
 
@@ -281,7 +284,9 @@ def get_trip_places(trip_id):
             # Calculate total distance if trip is optimized
             if user_trip.is_optimized and len(place_details) >= 2:
                 distance_matrix = calculate_distance_matrix(place_details)
-                total_distance = calculate_total_distance(range(len(place_details)), distance_matrix)
+                total_distance = calculate_total_distance(
+                    range(len(place_details)), distance_matrix
+                )
                 total_distance_km = round(total_distance / 1000, 2)
 
         result = {
@@ -294,9 +299,9 @@ def get_trip_places(trip_id):
                 'userId': str(user_trip.user_id),
                 'totalPlaces': len(place_details),
                 'totalDistance': total_distance,
-                'totalDistanceKm': total_distance_km
+                'totalDistanceKm': total_distance_km,
             },
-            'places': place_details
+            'places': TripPlaceSchema(many=True).dump(place_details),
         }
 
         return jsonify(result), 200
@@ -374,7 +379,7 @@ def reorder_trip_places(trip_id):
 
         # Create a mapping of place_id to new order
         place_order_map = {
-            place['place_id']: i + 1 for i, place in enumerate(data['places'])
+            place: i + 1 for i, place in enumerate(data['places'])
         }
 
         # Update orders
@@ -392,23 +397,21 @@ def reorder_trip_places(trip_id):
             Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
         )
 
+        # Return TripPlaceSchema response with place details from Neo4j
         result = []
         for place in updated_places:
-            result.append(
-                {
-                    'id': str(place.id),
-                    'place_id': place.place_id,
-                    'order': place.order,
-                }
-            )
+            place_info = get_place_details_from_neo4j(place.place_id)
+            if place_info:
+                place_info['order'] = place.order
+                place_info['created_at'] = place.created_at.isoformat()
+                result.append(place_info)
 
-        return jsonify(result), 200
+        return jsonify(TripPlaceSchema(many=True).dump(result)), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f'Error reordering trip places: {str(e)}')
         return jsonify({'error': 'Failed to reorder trip places'}), 500
-
 
 
 def get_place_details_from_neo4j(place_id):
@@ -533,7 +536,7 @@ def delete_all_user_trips():
     try:
         # Get all trips for the user
         user_trips = UserTrip.query.filter_by(user_id=user_id).all()
-        
+
         if not user_trips:
             return jsonify({'message': 'No trips found'}), 200
 
@@ -547,10 +550,12 @@ def delete_all_user_trips():
 
         db.session.commit()
 
-        return jsonify({
-            'message': 'All trips deleted successfully',
-            'deletedCount': len(user_trips)
-        }), 200
+        return jsonify(
+            {
+                'message': 'All trips deleted successfully',
+                'deletedCount': len(user_trips),
+            }
+        ), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
@@ -562,27 +567,35 @@ def calculate_distance_matrix(places):
     """Calculate distance matrix between all places."""
     size = len(places)
     matrix = [[0] * size for _ in range(size)]
-    
+
     for i in range(size):
         for j in range(size):
             if i != j:
                 # Calculate Haversine distance between two points
                 lat1, lon1 = places[i]['latitude'], places[i]['longitude']
                 lat2, lon2 = places[j]['latitude'], places[j]['longitude']
-                
+
                 # Convert to radians
-                lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-                
+                lat1, lon1, lat2, lon2 = map(
+                    math.radians, [lat1, lon1, lat2, lon2]
+                )
+
                 # Haversine formula
                 dlat = lat2 - lat1
                 dlon = lon2 - lon1
-                a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                a = (
+                    math.sin(dlat / 2) ** 2
+                    + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+                )
                 c = 2 * math.asin(math.sqrt(a))
                 r = 6371  # Radius of earth in kilometers
-                
-                matrix[i][j] = int(c * r * 1000)  # Convert to meters and round to integer
-                
+
+                matrix[i][j] = int(
+                    c * r * 1000
+                )  # Convert to meters and round to integer
+
     return matrix
+
 
 def solve_tsp(distance_matrix):
     """Solve TSP using Google OR-Tools."""
@@ -605,7 +618,7 @@ def solve_tsp(distance_matrix):
 
     # Solve the problem
     solution = routing.SolveWithParameters(search_parameters)
-    
+
     if not solution:
         return None
 
@@ -616,20 +629,21 @@ def solve_tsp(distance_matrix):
         node_index = manager.IndexToNode(index)
         route.append(node_index)
         index = solution.Value(routing.NextVar(index))
-    
+
     # Add the last node
     node_index = manager.IndexToNode(index)
     route.append(node_index)
-    
+
     # print(f"TSP route before processing: {route}")
-    
+
     # Remove the duplicate starting point if it exists
     if len(route) > 1 and route[0] == route[-1]:
         route = route[:-1]
-    
+
     # print(f"TSP route after removing duplicate: {route}")
-    
+
     return route
+
 
 def calculate_total_distance(route, distance_matrix):
     """Calculate total distance of the route."""
@@ -637,6 +651,7 @@ def calculate_total_distance(route, distance_matrix):
     for i in range(len(route) - 1):
         total_distance += distance_matrix[route[i]][route[i + 1]]
     return total_distance
+
 
 @blueprint.post('/<uuid:trip_id>/optimize')
 @jwt_required()
@@ -654,17 +669,23 @@ def optimize_trip(trip_id):
             return jsonify({'error': 'Trip not found'}), 404
 
         # Get all places in trip
-        places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
-        
+        places = (
+            Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+        )
+
         if len(places) < 2:
-            return jsonify({'error': 'Trip must have at least 2 places to optimize'}), 400
+            return jsonify(
+                {'error': 'Trip must have at least 2 places to optimize'}
+            ), 400
 
         # Get place details from Neo4j
         place_details = []
         for place in places:
             place_info = get_place_details_from_neo4j(place.place_id)
             if place_info:
-                place_info['trip_place_id'] = str(place.id)  # Keep track of the trip place ID
+                place_info['trip_place_id'] = str(
+                    place.id
+                )  # Keep track of the trip place ID
                 place_details.append(place_info)
 
         if not place_details:
@@ -672,15 +693,17 @@ def optimize_trip(trip_id):
 
         # Calculate distance matrix
         distance_matrix = calculate_distance_matrix(place_details)
-        
+
         # Solve TSP
         optimized_route = solve_tsp(distance_matrix)
-        
+
         if not optimized_route:
             return jsonify({'error': 'Failed to optimize route'}), 500
 
         # Calculate total distance
-        total_distance = calculate_total_distance(optimized_route, distance_matrix)
+        total_distance = calculate_total_distance(
+            optimized_route, distance_matrix
+        )
 
         # print(f"Optimized route: {optimized_route}")
 
@@ -698,13 +721,15 @@ def optimize_trip(trip_id):
 
         # Update trip optimization status
         user_trip.is_optimized = True
-        
+
         db.session.commit()
 
         # Get updated places in optimized order
-        updated_places = Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+        updated_places = (
+            Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+        )
         optimized_places = []
-        
+
         for place in updated_places:
             place_info = get_place_details_from_neo4j(place.place_id)
             if place_info:
@@ -720,13 +745,17 @@ def optimize_trip(trip_id):
         # for place in optimized_places:
         #     print(f"Place: {place['name']}, Order: {place['order']}")
 
-        return jsonify({
-            'message': 'Trip optimized successfully',
-            'isOptimized': True,
-            'totalDistance': total_distance,  # in meters
-            'totalDistanceKm': round(total_distance / 1000, 2),  # in kilometers
-            'places': optimized_places
-        }), 200
+        return jsonify(
+            {
+                'message': 'Trip optimized successfully',
+                'isOptimized': True,
+                'totalDistance': total_distance,  # in meters
+                'totalDistanceKm': round(
+                    total_distance / 1000, 2
+                ),  # in kilometers
+                'places': TripPlaceSchema(many=True).dump(optimized_places),
+            }
+        ), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
