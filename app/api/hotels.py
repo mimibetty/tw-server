@@ -1,8 +1,5 @@
 import json
 import logging
-import requests
-import uuid
-from datetime import datetime
 
 from flask import Blueprint, request
 from marshmallow import ValidationError, fields, pre_load, validates
@@ -146,7 +143,7 @@ class HotelSchema(ShortHotelSchema):
 
 @blueprint.post('/')
 def create_hotel():
-    data = HotelSchema().load(request.json)
+    data = HotelSchema().load(request.get_json())
 
     # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
@@ -431,23 +428,3 @@ def get_hotel(hotel_id):
         logger.warning('Redis is not available to set data: %s', e)
 
     return schema.dump(hotel), 200
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

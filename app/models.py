@@ -59,6 +59,11 @@ class UserFavourite(BaseModel):
         'User', backref='user_favourites', foreign_keys=[user_id]
     )
 
+    def __init__(self, user_id: uuid.UUID, place_id: str) -> None:
+        super().__init__()
+        self.user_id = user_id
+        self.place_id = place_id
+
 
 class UserReview(BaseModel):
     __tablename__ = 'user_reviews'
