@@ -1,6 +1,24 @@
-workers = 1
+import multiprocessing
+
+# Server settings
 bind = '0.0.0.0:8000'
-timeout = 120
-loglevel = 'info'
+
+# Logging settings
 accesslog = '-'
 errorlog = '-'
+loglevel = 'info'
+capture_output = True
+
+# Worker settings
+workers = 2 * multiprocessing.cpu_count() + 1
+worker_class = 'eventlet'
+worker_connections = 2000
+
+# Timeout settings
+timeout = 30
+graceful_timeout = 30
+keepalive = 2
+
+# Worker Restart Settings
+max_requests = 1000
+max_requests_jitter = 50
