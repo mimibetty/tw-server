@@ -257,7 +257,7 @@ def get_things_to_do():
                     t['is_favorite'] = t['element_id'] in favourite_ids
             else:
                 for t in things['data']:
-                    t['is_favorite'] = False
+                    t['isFavorite'] = False
             return things, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -428,7 +428,7 @@ def get_thing_to_do(thing_to_do_id):
         )
         thing_to_do['is_favorite'] = bool(favourite)
     else:
-        thing_to_do['is_favorite'] = False
+        thing_to_do['isFavorite'] = False
 
     # Cache the response for 6 hours
     try:

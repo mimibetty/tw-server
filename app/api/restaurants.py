@@ -328,7 +328,7 @@ def get_restaurants():
                     r['is_favorite'] = r['element_id'] in favourite_ids
             else:
                 for r in restaurants['data']:
-                    r['is_favorite'] = False
+                    r['isFavorite'] = False
             return restaurants, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -384,7 +384,7 @@ def get_restaurants():
             r['is_favorite'] = r['element_id'] in favourite_ids
     else:
         for r in restaurants_data:
-            r['is_favorite'] = False
+            r['isFavorite'] = False
 
     # Create paginated response
     response = create_paging(
@@ -423,8 +423,6 @@ def get_restaurant(restaurant_id):
             except Exception:
                 pass
             if user_id:
-                from app.models import UserFavourite, db
-
                 is_favorite = (
                     db.session.query(UserFavourite)
                     .filter_by(user_id=user_id, place_id=restaurant_id)
