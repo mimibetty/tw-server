@@ -323,7 +323,7 @@ def get_things_to_do():
             t['is_favorite'] = t['element_id'] in favourite_ids
     else:
         for t in processed_results:
-            t['is_favorite'] = False
+            t['isFavorite'] = False
 
     # Create paginated response
     response = create_paging(
@@ -374,7 +374,7 @@ def get_thing_to_do(thing_to_do_id):
                 )
                 thing_to_do['is_favorite'] = bool(favourite)
             else:
-                thing_to_do['is_favorite'] = False
+                thing_to_do['isFavorite'] = False
             return schema.dump(thing_to_do), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)

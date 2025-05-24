@@ -433,7 +433,7 @@ def get_restaurant(restaurant_id):
                 )
                 restaurant['is_favorite'] = is_favorite
             else:
-                restaurant['is_favorite'] = False
+                restaurant['isFavorite'] = False
             return schema.dump(restaurant), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -494,7 +494,7 @@ def get_restaurant(restaurant_id):
         )
         restaurant['is_favorite'] = is_favorite
     else:
-        restaurant['is_favorite'] = False
+        restaurant['isFavorite'] = False
 
     # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:

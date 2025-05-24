@@ -305,7 +305,7 @@ def get_hotels():
                     hotel['is_favorite'] = hotel['element_id'] in favourite_ids
             else:
                 for hotel in hotels['data']:
-                    hotel['is_favorite'] = False
+                    hotel['isFavorite'] = False
             return hotels, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -410,7 +410,7 @@ def get_hotel(hotel_id):
                 )
                 hotel['is_favorite'] = bool(favourite)
             else:
-                hotel['is_favorite'] = False
+                hotel['isFavorite'] = False
             return schema.dump(hotel), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
