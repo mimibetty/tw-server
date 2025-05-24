@@ -1,5 +1,3 @@
-import multiprocessing
-
 # Server settings
 bind = '0.0.0.0:8000'
 
@@ -10,7 +8,7 @@ loglevel = 'info'
 capture_output = True
 
 # Worker settings
-workers = 2 * multiprocessing.cpu_count() + 1
+workers = 2
 worker_class = 'eventlet'
 worker_connections = 2000
 
