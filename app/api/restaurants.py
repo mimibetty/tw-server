@@ -2,9 +2,11 @@ import json
 import logging
 
 from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
+from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ class ShortRestaurantSchema(CamelCaseSchema):
     city = fields.Nested(AttachCitySchema, required=True)
     email = fields.Email(required=False, allow_none=True)
     image = fields.String(required=True)
+    is_favorite = fields.Boolean(dump_only=True, default=False)
     latitude = fields.Float(required=True)
     longitude = fields.Float(required=True)
     name = fields.String(required=True)
@@ -289,11 +292,18 @@ def create_restaurant():
 
 
 @blueprint.get('/')
+@jwt_required(optional=True)
 def get_restaurants():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
     offset = (page - 1) * size
+
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
 
     # Check if the result is cached
     redis = get_redis()
@@ -301,7 +311,25 @@ def get_restaurants():
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            restaurants = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                restaurant_ids = [r['element_id'] for r in restaurants['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(restaurant_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for r in restaurants['data']:
+                    r['is_favorite'] = r['element_id'] in favourite_ids
+            else:
+                for r in restaurants['data']:
+                    r['is_favorite'] = False
+            return restaurants, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -338,18 +366,36 @@ def get_restaurants():
         del record['price_levels']
         del record['city']
 
+    restaurants_data = [record['r'] for record in result]
+
+    # Add is_favorite field
+    if user_id:
+        restaurant_ids = [r['element_id'] for r in restaurants_data]
+        favourites = (
+            db.session.query(UserFavourite.place_id)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id.in_(restaurant_ids),
+            )
+            .all()
+        )
+        favourite_ids = set(f[0] for f in favourites)
+        for r in restaurants_data:
+            r['is_favorite'] = r['element_id'] in favourite_ids
+    else:
+        for r in restaurants_data:
+            r['is_favorite'] = False
+
     # Create paginated response
     response = create_paging(
-        data=ShortRestaurantSchema(many=True).dump(
-            [record['r'] for record in result]
-        ),
+        data=ShortRestaurantSchema(many=True).dump(restaurants_data),
         page=page,
         size=size,
         offset=offset,
         total_count=total_count,
     )
 
-    # Cache the response for 6 hours
+    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
@@ -358,51 +404,8 @@ def get_restaurants():
     return response, 200
 
 
-@blueprint.get('/<restaurant_id>/short-details')
-def get_short_restaurant(restaurant_id):
-    schema = ShortRestaurantSchema()
-
-    # Check if the result is cached
-    redis = get_redis()
-    cache_key = f'restaurants:short-details:{restaurant_id}'
-    try:
-        cached_response = redis.get(cache_key)
-        if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
-    except Exception as e:
-        logger.warning('Redis is not available to get data: %s', e)
-
-    # Get the restaurant details along with price_levels and city
-    result = execute_neo4j_query(
-        """
-        MATCH (r:Restaurant)
-        WHERE elementId(r) = $restaurant_id
-        OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-        OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
-        RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
-        """,
-        {'restaurant_id': restaurant_id},
-    )
-
-    if not result:
-        return {'error': 'Restaurant not found'}, 404
-
-    restaurant = result[0]['r']
-    restaurant['element_id'] = result[0]['element_id']
-    restaurant['price_levels'] = result[0]['price_levels']
-    if result[0]['city']:
-        restaurant['city'] = result[0]['city']
-
-    # Cache the response for 6 hours
-    try:
-        redis.set(cache_key, json.dumps(restaurant), ex=21600)
-    except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
-    return schema.dump(restaurant), 200
-
-
-@blueprint.get('/<restaurant_id>/details')
+@blueprint.get('/<restaurant_id>/')
+@jwt_required(optional=True)
 def get_restaurant(restaurant_id):
     schema = RestaurantSchema()
 
@@ -412,7 +415,26 @@ def get_restaurant(restaurant_id):
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
+            restaurant = json.loads(cached_response)
+            # Add is_favorite field if user is authenticated
+            user_id = None
+            try:
+                user_id = get_jwt_identity()
+            except Exception:
+                pass
+            if user_id:
+                from app.models import UserFavourite, db
+
+                is_favorite = (
+                    db.session.query(UserFavourite)
+                    .filter_by(user_id=user_id, place_id=restaurant_id)
+                    .first()
+                    is not None
+                )
+                restaurant['is_favorite'] = is_favorite
+            else:
+                restaurant['is_favorite'] = False
+            return schema.dump(restaurant), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -457,7 +479,24 @@ def get_restaurant(restaurant_id):
         except Exception:
             restaurant['hours'] = None
 
-    # Cache the response for 6 hours
+    # Add is_favorite field
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
+    if user_id:
+        is_favorite = (
+            db.session.query(UserFavourite)
+            .filter_by(user_id=user_id, place_id=restaurant_id)
+            .first()
+            is not None
+        )
+        restaurant['is_favorite'] = is_favorite
+    else:
+        restaurant['is_favorite'] = False
+
+    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(restaurant), ex=21600)
     except Exception as e:

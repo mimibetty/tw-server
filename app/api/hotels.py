@@ -2,9 +2,11 @@ import json
 import logging
 
 from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
+from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class ShortHotelSchema(CamelCaseSchema):
     raw_ranking = fields.Float(required=True, load_only=True)
     street = fields.String(required=True, allow_none=True)
     type = fields.String(dump_only=True)
+    is_favorite = fields.Boolean(dump_only=True, default=False)
 
     def on_bind_field(self, field_name, field_obj):
         super().on_bind_field(field_name, field_obj)
@@ -266,11 +269,18 @@ def create_hotel():
 
 
 @blueprint.get('/')
+@jwt_required(optional=True)
 def get_hotels():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
     offset = (page - 1) * size
+
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
 
     # Check if the result is cached
     redis = get_redis()
@@ -278,7 +288,25 @@ def get_hotels():
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            hotels = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                hotel_ids = [hotel['element_id'] for hotel in hotels['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(hotel_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for hotel in hotels['data']:
+                    hotel['is_favorite'] = hotel['element_id'] in favourite_ids
+            else:
+                for hotel in hotels['data']:
+                    hotel['is_favorite'] = False
+            return hotels, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -314,18 +342,36 @@ def get_hotels():
         del record['price_levels']
         del record['city']
 
+    hotels_data = [record['h'] for record in result]
+
+    # Add is_favorite field
+    if user_id:
+        hotel_ids = [hotel['element_id'] for hotel in hotels_data]
+        favourites = (
+            db.session.query(UserFavourite.place_id)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id.in_(hotel_ids),
+            )
+            .all()
+        )
+        favourite_ids = set(f[0] for f in favourites)
+        for hotel in hotels_data:
+            hotel['is_favorite'] = hotel['element_id'] in favourite_ids
+    else:
+        for hotel in hotels_data:
+            hotel['is_favorite'] = False
+
     # Create paginated response
     response = create_paging(
-        data=ShortHotelSchema(many=True).dump(
-            [record['h'] for record in result]
-        ),
+        data=ShortHotelSchema(many=True).dump(hotels_data),
         page=page,
         size=size,
         offset=offset,
         total_count=total_count,
     )
 
-    # Cache the response for 6 hours
+    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
@@ -334,52 +380,16 @@ def get_hotels():
     return response, 200
 
 
-@blueprint.get('/<hotel_id>/short-details')
-def get_short_hotel(hotel_id):
-    schema = ShortHotelSchema()
-
-    # Check if the result is cached
-    redis = get_redis()
-    cache_key = f'hotels:short:{hotel_id}'
-    try:
-        cached_response = redis.get(cache_key)
-        if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
-    except Exception as e:
-        logger.warning('Redis is not available to get data: %s', e)
-
-    # Get the hotel details along with features, price_levels, and city
-    result = execute_neo4j_query(
-        """
-        MATCH (h:Hotel)
-        WHERE elementId(h) = $hotel_id
-        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
-        """,
-        {'hotel_id': hotel_id},
-    )
-
-    if not result:
-        return {'error': 'Hotel not found'}, 404
-
-    hotel = result[0]['h']
-    hotel['element_id'] = result[0]['element_id']
-    hotel['price_levels'] = result[0]['price_levels']
-    hotel['city'] = result[0]['city']
-
-    # Cache the response for 6 hours
-    try:
-        redis.set(cache_key, json.dumps(hotel), ex=21600)
-    except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
-    return schema.dump(hotel), 200
-
-
-@blueprint.get('/<hotel_id>/details')
+@blueprint.get('/<hotel_id>/')
+@jwt_required(optional=True)
 def get_hotel(hotel_id):
     schema = HotelSchema()
+
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
 
     # Check if the result is cached
     redis = get_redis()
@@ -387,7 +397,21 @@ def get_hotel(hotel_id):
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
+            hotel = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                favourite = (
+                    db.session.query(UserFavourite)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id == hotel_id,
+                    )
+                    .first()
+                )
+                hotel['is_favorite'] = bool(favourite)
+            else:
+                hotel['is_favorite'] = False
+            return schema.dump(hotel), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -421,7 +445,21 @@ def get_hotel(hotel_id):
     hotel['hotel_class'] = result[0]['hotel_class']
     hotel['city'] = result[0]['city']
 
-    # Cache the response for 6 hours
+    # Add is_favorite field
+    if user_id:
+        favourite = (
+            db.session.query(UserFavourite)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id == hotel_id,
+            )
+            .first()
+        )
+        hotel['is_favorite'] = bool(favourite)
+    else:
+        hotel['is_favorite'] = False
+
+    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(hotel), ex=21600)
     except Exception as e:

@@ -25,22 +25,24 @@ class RequestMessageSchema(CamelCaseSchema):
     message = fields.Str(required=True, validate=lambda x: len(x) > 0)
 
 
-def generate_stream(contents):
+def generate_stream(message):
     for chunk in client.models.generate_content_stream(
         model='gemini-2.0-flash',
-        contents=contents,
+        contents=[{'role': 'user', 'parts': [message]}],
         config=types.GenerateContentConfig(
-            # system_instruction=SYSTEM_INSTRUCTION,
-            temperature=0.9,
+            system_instruction=SYSTEM_INSTRUCTION,
         ),
     ):
-        yield chunk.text
+        if chunk.text is not None:
+            yield chunk.text
         time.sleep(0.1)
 
 
 @blueprint.post('/')
 def request_message():
-    data = RequestMessageSchema().load(request.json)
-    return Response(
-        generate_stream(data['message']), mimetype='text/event-stream'
-    )
+    data = RequestMessageSchema().load(request.get_json())
+    if not isinstance(data, dict) or 'message' not in data:
+        return {'error': 'Invalid input data.'}, 400
+
+    message = data['message']
+    return Response(generate_stream(message), mimetype='text/event-stream')

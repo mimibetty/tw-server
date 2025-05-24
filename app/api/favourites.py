@@ -1,7 +1,7 @@
 import logging
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import fields
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -121,38 +121,11 @@ def delete_favourite(place_id):
         db.session.delete(favourite)
         db.session.commit()
 
-        return jsonify({'message': 'Place removed from favourites successfully'}), 200
+        return jsonify(
+            {'message': 'Place removed from favourites successfully'}
+        ), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f'Error removing place from favourites: {str(e)}')
         return jsonify({'error': 'Failed to remove place from favourites'}), 500
-
-
-@blueprint.get('/check/<string:place_id>')
-def check_favourite(place_id):
-    """Check if a place exists in the current user's favourites."""
-    try:
-        # Try to verify JWT token if present, but don't require it
-        user_id = None
-        try:
-            verify_jwt_in_request(optional=True)
-            user_id = get_jwt_identity()
-        except:
-            pass
-
-        if not user_id:
-            return jsonify({'isFavourite': False}), 200
-
-        # Check if place exists in user's favourites
-        favourite = (
-            db.session.query(UserFavourite)
-            .filter_by(user_id=user_id, place_id=place_id)
-            .first()
-        )
-
-        return jsonify({'isFavourite': bool(favourite)}), 200
-
-    except SQLAlchemyError as e:
-        logger.error(f'Error checking favourite status: {str(e)}')
-        return jsonify({'error': 'Failed to check favourite status'}), 500

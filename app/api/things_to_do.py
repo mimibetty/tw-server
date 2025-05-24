@@ -2,9 +2,11 @@ import json
 import logging
 
 from flask import Blueprint, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import CamelCaseSchema
+from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ class ShortThingToDoSchema(CamelCaseSchema):
     city = fields.Nested(AttachCitySchema, required=True)
     email = fields.Email(required=False, allow_none=True)
     image = fields.String(required=True)
+    is_favorite = fields.Boolean(dump_only=True, default=False)
     latitude = fields.Float(required=True)
     longitude = fields.Float(required=True)
     name = fields.String(required=True)
@@ -216,6 +219,7 @@ def create_thing_to_do():
 
 
 @blueprint.get('/')
+@jwt_required(optional=True)
 def get_things_to_do():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
@@ -224,13 +228,37 @@ def get_things_to_do():
     sort_order = request.args.get('order', default='desc', type=str)
     sort_order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
 
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
+
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return json.loads(cached_response), 200
+            things = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                thing_ids = [t['element_id'] for t in things['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(thing_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for t in things['data']:
+                    t['is_favorite'] = t['element_id'] in favourite_ids
+            else:
+                for t in things['data']:
+                    t['is_favorite'] = False
+            return things, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -277,8 +305,25 @@ def get_things_to_do():
                 if total > 0:
                     rating = sum((i + 1) * rh[i] for i in range(5)) / total
                     thing['rating'] = round(rating, 1)
-
         processed_results.append(thing)
+
+    # Add is_favorite field
+    if user_id:
+        thing_ids = [t['element_id'] for t in processed_results]
+        favourites = (
+            db.session.query(UserFavourite.place_id)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id.in_(thing_ids),
+            )
+            .all()
+        )
+        favourite_ids = set(f[0] for f in favourites)
+        for t in processed_results:
+            t['is_favorite'] = t['element_id'] in favourite_ids
+    else:
+        for t in processed_results:
+            t['is_favorite'] = False
 
     # Create paginated response
     response = create_paging(
@@ -289,7 +334,7 @@ def get_things_to_do():
         total_count=total_count,
     )
 
-    # Cache the response for 6 hours
+    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
@@ -298,51 +343,17 @@ def get_things_to_do():
     return response, 200
 
 
-@blueprint.get('/<thing_to_do_id>/short-details')
-def get_short_thing_to_do(thing_to_do_id):
-    schema = ShortThingToDoSchema()
-
-    # Check if the result is cached
-    redis = get_redis()
-    cache_key = f'things-to-do:short-details:{thing_to_do_id}'
-    try:
-        cached_response = redis.get(cache_key)
-        if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
-    except Exception as e:
-        logger.warning('Redis is not available to get data: %s', e)
-
-    # Get the short details of the thing to do
-    result = execute_neo4j_query(
-        """
-        MATCH (t:ThingToDo)
-        WHERE elementId(t) = $thing_to_do_id
-        OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
-        RETURN t, elementId(t) AS element_id, c AS city
-        """,
-        {'thing_to_do_id': thing_to_do_id},
-    )
-
-    if not result:
-        return {'error': 'Thing to do not found'}, 404
-
-    thing_to_do = result[0]['t']
-    thing_to_do['element_id'] = result[0]['element_id']
-    if result[0]['city']:
-        thing_to_do['city'] = result[0]['city']
-
-    # Cache the response for 6 hours
-    try:
-        redis.set(cache_key, json.dumps(thing_to_do), ex=21600)
-    except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
-    return schema.dump(thing_to_do), 200
-
-
-@blueprint.get('/<thing_to_do_id>/details')
+@blueprint.get('/<thing_to_do_id>/')
+@jwt_required(optional=True)
 def get_thing_to_do(thing_to_do_id):
     schema = ThingToDoSchema()
+
+    # Check if the user is authenticated
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
 
     # Check if the result is cached
     redis = get_redis()
@@ -350,7 +361,21 @@ def get_thing_to_do(thing_to_do_id):
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
-            return schema.dump(json.loads(cached_response)), 200
+            thing_to_do = json.loads(cached_response)
+            # Add is_favorite field
+            if user_id:
+                favourite = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id == thing_to_do_id,
+                    )
+                    .first()
+                )
+                thing_to_do['is_favorite'] = bool(favourite)
+            else:
+                thing_to_do['is_favorite'] = False
+            return schema.dump(thing_to_do), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
@@ -390,6 +415,20 @@ def get_thing_to_do(thing_to_do_id):
             if total > 0:
                 rating = sum((i + 1) * rh[i] for i in range(5)) / total
                 thing_to_do['rating'] = round(rating, 1)
+
+    # Add is_favorite field
+    if user_id:
+        favourite = (
+            db.session.query(UserFavourite.place_id)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id == thing_to_do_id,
+            )
+            .first()
+        )
+        thing_to_do['is_favorite'] = bool(favourite)
+    else:
+        thing_to_do['is_favorite'] = False
 
     # Cache the response for 6 hours
     try:
