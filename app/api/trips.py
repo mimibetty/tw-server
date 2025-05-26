@@ -72,14 +72,13 @@ def create_user_trip():
         return jsonify(
             {
                 'id': str(user_trip.id),
-                'userId': str(user_trip.user_id),
+                'user_id': str(user_trip.user_id),
                 'name': user_trip.name,
-                'isOptimized': user_trip.is_optimized,
-                'createdAt': user_trip.created_at.isoformat(),
-                'updatedAt': user_trip.updated_at.isoformat(),
+                'is_optimized': user_trip.is_optimized,
+                'created_at': user_trip.created_at.isoformat(),
+                'updated_at': user_trip.updated_at.isoformat(),
             }
         ), 201
-
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f'Error creating user trip: {str(e)}')
@@ -104,10 +103,10 @@ def get_user_trips():
                 {
                     'id': str(trip.id),
                     'name': trip.name,
-                    'createdAt': trip.created_at.isoformat(),
-                    'updatedAt': trip.updated_at.isoformat(),
-                    'placeCount': len(trip.trips),
-                    'isOptimized': trip.is_optimized,
+                    'created_at': trip.created_at.isoformat(),
+                    'updated_at': trip.updated_at.isoformat(),
+                    'place_count': len(trip.trips),
+                    'is_optimized': trip.is_optimized,
                 }
             )
 

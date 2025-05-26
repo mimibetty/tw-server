@@ -83,9 +83,9 @@ class RequestSchema(ma.Schema):
 def add_favourite():
     """Add a place to the current user's favourites."""
     user_id = get_jwt_identity()
-    place_id = request.get_json().get('placeId')
+    place_id = request.get_json().get('place_id')
     if not place_id:
-        return jsonify({'error': 'placeId is required'}), 400
+        return jsonify({'error': 'place_id is required'}), 400
 
     # Check if already exists
     existing_favourite = (

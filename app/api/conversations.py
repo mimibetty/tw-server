@@ -28,7 +28,9 @@ class RequestMessageSchema(ma.Schema):
 def generate_stream(message):
     for chunk in client.models.generate_content_stream(
         model='gemini-2.0-flash',
-        contents=[{'role': 'user', 'parts': [message]}],
+        contents=[
+            types.Content(role='user', parts=[types.Part(text=message)]),
+        ],
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
         ),
