@@ -5,7 +5,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 blueprint = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
 
 
-class AttachCitySchema(CamelCaseSchema):
+class AttachCitySchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
@@ -34,7 +34,7 @@ class AttachCitySchema(CamelCaseSchema):
         return value
 
 
-class ShortThingToDoSchema(CamelCaseSchema):
+class ShortThingToDoSchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     city = fields.Nested(AttachCitySchema, required=True)
@@ -78,9 +78,8 @@ class ShortThingToDoSchema(CamelCaseSchema):
 
     @pre_load
     def calculate_rating_from_histogram(self, data, **kwargs):
-        # Set default rating_histogram to [0,0,0,0,0] if not provided
-        if 'rating_histogram' not in data and 'ratingHistogram' not in data:
-            data['ratingHistogram'] = [0, 0, 0, 0, 0]
+        if 'rating_histogram' not in data:
+            data['rating_histogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
 
         # Calculate rating from histogram if available
@@ -98,45 +97,24 @@ class ShortThingToDoSchema(CamelCaseSchema):
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-        elif (
-            'ratingHistogram' in data
-            and isinstance(data['ratingHistogram'], list)
-            and len(data['ratingHistogram']) == 5
-        ):
-            rh = data['ratingHistogram']
-            total = sum(rh)
-            if total > 0:
-                calculated_rating = (
-                    sum((i + 1) * rh[i] for i in range(5)) / total
-                )
-                data['rating'] = round(calculated_rating, 1)
-            else:
-                data['rating'] = 0
 
         return data
 
 
 class ThingToDoSchema(ShortThingToDoSchema):
-    # Common fields
     phone = fields.String(required=False, allow_none=True)
     photos = fields.List(fields.String(), required=False, default=list)
     website = fields.String(required=False, allow_none=True)
 
-    # Thing-to-do specific fields
     description = fields.String(required=False, allow_none=True)
     subtypes = fields.List(fields.String(), required=False, default=list)
     subcategories = fields.List(fields.String(), required=False, default=list)
-
-    def on_bind_field(self, field_name, field_obj):
-        super().on_bind_field(field_name, field_obj)
 
 
 @blueprint.post('/')
 def create_thing_to_do():
     schema = ThingToDoSchema()
     data = schema.load(request.json)
-
-    # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
 
     # Create the thing to do and attach it to the city in Neo4j
@@ -243,7 +221,7 @@ def get_things_to_do():
             things = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                thing_ids = [t['elementId'] for t in things['data']]
+                thing_ids = [t['element_id'] for t in things['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -254,10 +232,10 @@ def get_things_to_do():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for t in things['data']:
-                    t['is_favorite'] = t['elementId'] in favourite_ids
+                    t['is_favorite'] = t['element_id'] in favourite_ids
             else:
                 for t in things['data']:
-                    t['isFavorite'] = False
+                    t['is_favorite'] = False
             return things, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -323,7 +301,7 @@ def get_things_to_do():
             t['is_favorite'] = t['element_id'] in favourite_ids
     else:
         for t in processed_results:
-            t['isFavorite'] = False
+            t['is_favorite'] = False
 
     # Create paginated response
     response = create_paging(
@@ -374,7 +352,7 @@ def get_thing_to_do(thing_to_do_id):
                 )
                 thing_to_do['is_favorite'] = bool(favourite)
             else:
-                thing_to_do['isFavorite'] = False
+                thing_to_do['is_favorite'] = False
             return schema.dump(thing_to_do), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -428,7 +406,7 @@ def get_thing_to_do(thing_to_do_id):
         )
         thing_to_do['is_favorite'] = bool(favourite)
     else:
-        thing_to_do['isFavorite'] = False
+        thing_to_do['is_favorite'] = False
 
     # Cache the response for 6 hours
     try:

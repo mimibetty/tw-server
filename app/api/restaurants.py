@@ -5,7 +5,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 blueprint = Blueprint('restaurants', __name__, url_prefix='/restaurants')
 
 
-class SimplifiedHourSchema(CamelCaseSchema):
+class SimplifiedHourSchema(ma.Schema):
     open = fields.String(required=True)
     close = fields.String(required=True)
 
 
-class HoursSchema(CamelCaseSchema):
+class HoursSchema(ma.Schema):
     monday = fields.Nested(SimplifiedHourSchema, allow_none=True)
     tuesday = fields.Nested(SimplifiedHourSchema, allow_none=True)
     wednesday = fields.Nested(SimplifiedHourSchema, allow_none=True)
@@ -29,7 +29,7 @@ class HoursSchema(CamelCaseSchema):
     timezone = fields.String(allow_none=True)
 
 
-class AttachCitySchema(CamelCaseSchema):
+class AttachCitySchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
@@ -50,7 +50,7 @@ class AttachCitySchema(CamelCaseSchema):
         return value
 
 
-class ShortRestaurantSchema(CamelCaseSchema):
+class ShortRestaurantSchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     city = fields.Nested(AttachCitySchema, required=True)
@@ -95,9 +95,8 @@ class ShortRestaurantSchema(CamelCaseSchema):
 
     @pre_load
     def calculate_rating_from_histogram(self, data, **kwargs):
-        # Set default rating_histogram to [0,0,0,0,0] if not provided
-        if 'rating_histogram' not in data and 'ratingHistogram' not in data:
-            data['ratingHistogram'] = [0, 0, 0, 0, 0]
+        if 'rating_histogram' not in data:
+            data['rating_histogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
 
         # Calculate rating from histogram if available
@@ -115,26 +114,11 @@ class ShortRestaurantSchema(CamelCaseSchema):
                 data['rating'] = round(calculated_rating, 1)
             else:
                 data['rating'] = 0
-        elif (
-            'ratingHistogram' in data
-            and isinstance(data['ratingHistogram'], list)
-            and len(data['ratingHistogram']) == 5
-        ):
-            rh = data['ratingHistogram']
-            total = sum(rh)
-            if total > 0:
-                calculated_rating = (
-                    sum((i + 1) * rh[i] for i in range(5)) / total
-                )
-                data['rating'] = round(calculated_rating, 1)
-            else:
-                data['rating'] = 0
 
         return data
 
 
 class RestaurantSchema(ShortRestaurantSchema):
-    # Common fields
     phone = fields.String(required=False, allow_none=True)
     photos = fields.List(fields.String(), required=False, default=list)
     website = fields.String(required=False, allow_none=True)
@@ -152,15 +136,10 @@ class RestaurantSchema(ShortRestaurantSchema):
     cuisines = fields.List(fields.String(), required=False, default=list)
     traveler_choice_award = fields.Boolean(required=False, default=False)
 
-    def on_bind_field(self, field_name, field_obj):
-        super().on_bind_field(field_name, field_obj)
-
 
 @blueprint.post('/')
 def create_restaurant():
     data = RestaurantSchema().load(request.json)
-
-    # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
 
     # Get data with defaults for empty lists
@@ -314,7 +293,7 @@ def get_restaurants():
             restaurants = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                restaurant_ids = [r['elementId'] for r in restaurants['data']]
+                restaurant_ids = [r['element_id'] for r in restaurants['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -325,10 +304,10 @@ def get_restaurants():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for r in restaurants['data']:
-                    r['is_favorite'] = r['elementId'] in favourite_ids
+                    r['is_favorite'] = r['element_id'] in favourite_ids
             else:
                 for r in restaurants['data']:
-                    r['isFavorite'] = False
+                    r['is_favorite'] = False
             return restaurants, 200
     except Exception as e:
         logger.exception(e)
@@ -385,7 +364,7 @@ def get_restaurants():
             r['is_favorite'] = r['element_id'] in favourite_ids
     else:
         for r in restaurants_data:
-            r['isFavorite'] = False
+            r['is_favorite'] = False
 
     # Create paginated response
     response = create_paging(
@@ -432,7 +411,7 @@ def get_restaurant(restaurant_id):
                 )
                 restaurant['is_favorite'] = is_favorite
             else:
-                restaurant['isFavorite'] = False
+                restaurant['is_favorite'] = False
             return schema.dump(restaurant), 200
     except Exception as e:
         logger.exception(e)
@@ -494,7 +473,7 @@ def get_restaurant(restaurant_id):
         )
         restaurant['is_favorite'] = is_favorite
     else:
-        restaurant['isFavorite'] = False
+        restaurant['is_favorite'] = False
 
     # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:

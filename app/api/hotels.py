@@ -5,7 +5,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import ValidationError, fields, pre_load, validates
 
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import create_paging, execute_neo4j_query, get_redis
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 blueprint = Blueprint('hotels', __name__, url_prefix='/hotels')
 
 
-class AttachCitySchema(CamelCaseSchema):
+class AttachCitySchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
@@ -34,7 +34,7 @@ class AttachCitySchema(CamelCaseSchema):
         return value
 
 
-class ShortHotelSchema(CamelCaseSchema):
+class ShortHotelSchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     city = fields.Nested(AttachCitySchema, required=True)
@@ -82,9 +82,8 @@ class ShortHotelSchema(CamelCaseSchema):
 
     @pre_load
     def calculate_rating_from_histogram(self, data, **kwargs):
-        # Set default rating_histogram to [0,0,0,0,0] if not provided
-        if 'rating_histogram' not in data and 'ratingHistogram' not in data:
-            data['ratingHistogram'] = [0, 0, 0, 0, 0]
+        if 'rating_histogram' not in data:
+            data['rating_histogram'] = [0, 0, 0, 0, 0]
             data['rating'] = 0
 
         # Calculate rating from histogram if available
@@ -94,20 +93,6 @@ class ShortHotelSchema(CamelCaseSchema):
             and len(data['rating_histogram']) == 5
         ):
             rh = data['rating_histogram']
-            total = sum(rh)
-            if total > 0:
-                calculated_rating = (
-                    sum((i + 1) * rh[i] for i in range(5)) / total
-                )
-                data['rating'] = round(calculated_rating, 1)
-            else:
-                data['rating'] = 0
-        elif (
-            'ratingHistogram' in data
-            and isinstance(data['ratingHistogram'], list)
-            and len(data['ratingHistogram']) == 5
-        ):
-            rh = data['ratingHistogram']
             total = sum(rh)
             if total > 0:
                 calculated_rating = (
@@ -134,9 +119,6 @@ class HotelSchema(ShortHotelSchema):
     number_of_rooms = fields.Integer(required=False)
     price_range = fields.String(required=False, allow_none=True)
 
-    def on_bind_field(self, field_name, field_obj):
-        super().on_bind_field(field_name, field_obj)
-
     @validates('number_of_rooms')
     def validate_number_of_rooms(self, value: int):
         if value is not None and value <= 0:
@@ -147,8 +129,6 @@ class HotelSchema(ShortHotelSchema):
 @blueprint.post('/')
 def create_hotel():
     data = HotelSchema().load(request.get_json())
-
-    # Extract city postal code from the request data
     city_postal_code = data['city']['postal_code']
 
     # Get data with defaults for empty lists
@@ -291,7 +271,7 @@ def get_hotels():
             hotels = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                hotel_ids = [hotel['elementId'] for hotel in hotels['data']]
+                hotel_ids = [hotel['element_id'] for hotel in hotels['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -302,10 +282,10 @@ def get_hotels():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for hotel in hotels['data']:
-                    hotel['is_favorite'] = hotel['elementId'] in favourite_ids
+                    hotel['is_favorite'] = hotel['element_id'] in favourite_ids
             else:
                 for hotel in hotels['data']:
-                    hotel['isFavorite'] = False
+                    hotel['is_favorite'] = False
             return hotels, 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -410,7 +390,7 @@ def get_hotel(hotel_id):
                 )
                 hotel['is_favorite'] = bool(favourite)
             else:
-                hotel['isFavorite'] = False
+                hotel['is_favorite'] = False
             return schema.dump(hotel), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
