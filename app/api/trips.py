@@ -177,7 +177,6 @@ def add_place_to_trip(trip_id):
         ), 201
 
     except SQLAlchemyError as e:
-        print('Error adding place to trip: ', e)
         db.session.rollback()
         logger.error(f'Error adding place to trip: {str(e)}')
         return jsonify({'error': 'Failed to add place to trip'}), 500
@@ -300,8 +299,6 @@ def get_trip_places(trip_id):
             """,
             {'place_ids': place_ids},
         )
-        print('place_ids', place_ids)
-        print('results', results)
         # Process results and create a map of place_id to place details
         for result in results:
             place_data = result['p']
@@ -756,14 +753,9 @@ def solve_tsp(distance_matrix):
     node_index = manager.IndexToNode(index)
     route.append(node_index)
 
-    # print(f"TSP route before processing: {route}")
-
     # Remove the duplicate starting point if it exists
     if len(route) > 1 and route[0] == route[-1]:
         route = route[:-1]
-
-    # print(f"TSP route after removing duplicate: {route}")
-
     return route
 
 
@@ -827,19 +819,15 @@ def optimize_trip(trip_id):
             optimized_route, distance_matrix
         )
 
-        # print(f"Optimized route: {optimized_route}")
-
         # First, reset all orders to 0
         for place in places:
             place.order = 0
-            # print(f"Reset place {place.id} order to 0")
 
         # Update trip places order
         for i, place_index in enumerate(optimized_route):
             place = Trip.query.get(place_details[place_index]['trip_place_id'])
             if place:
                 place.order = i + 1  # Start from 1
-                # print(f"Set place {place.id} order to {i + 1}")
 
         # Update trip optimization status
         user_trip.is_optimized = True
@@ -856,16 +844,10 @@ def optimize_trip(trip_id):
             place_info = get_place_details_from_neo4j(place.place_id)
             if place_info:
                 place_info['order'] = place.order
-                # print(f"Final place {place.id} order: {place.order}")
                 optimized_places.append(place_info)
 
         # Sort places by order to ensure correct sequence
         optimized_places.sort(key=lambda x: x['order'])
-
-        # Print final orders for verification
-        # print("Final orders:")
-        # for place in optimized_places:
-        #     print(f"Place: {place['name']}, Order: {place['order']}")
 
         return jsonify(
             {
@@ -879,7 +861,6 @@ def optimize_trip(trip_id):
             }
         ), 200
 
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         db.session.rollback()
-        print(f'Error optimizing trip: {str(e)}')
         return jsonify({'error': 'Failed to optimize trip'}), 500
