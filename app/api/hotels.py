@@ -291,7 +291,7 @@ def get_hotels():
             hotels = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                hotel_ids = [hotel['element_id'] for hotel in hotels['data']]
+                hotel_ids = [hotel['elementId'] for hotel in hotels['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -302,7 +302,7 @@ def get_hotels():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for hotel in hotels['data']:
-                    hotel['is_favorite'] = hotel['element_id'] in favourite_ids
+                    hotel['is_favorite'] = hotel['elementId'] in favourite_ids
             else:
                 for hotel in hotels['data']:
                     hotel['isFavorite'] = False

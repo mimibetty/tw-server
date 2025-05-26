@@ -243,7 +243,7 @@ def get_things_to_do():
             things = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                thing_ids = [t['element_id'] for t in things['data']]
+                thing_ids = [t['elementId'] for t in things['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -254,7 +254,7 @@ def get_things_to_do():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for t in things['data']:
-                    t['is_favorite'] = t['element_id'] in favourite_ids
+                    t['is_favorite'] = t['elementId'] in favourite_ids
             else:
                 for t in things['data']:
                     t['isFavorite'] = False

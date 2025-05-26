@@ -314,7 +314,7 @@ def get_restaurants():
             restaurants = json.loads(cached_response)
             # Add is_favorite field if user_id exists
             if user_id:
-                restaurant_ids = [r['element_id'] for r in restaurants['data']]
+                restaurant_ids = [r['elementId'] for r in restaurants['data']]
                 favourites = (
                     db.session.query(UserFavourite.place_id)
                     .filter(
@@ -325,12 +325,13 @@ def get_restaurants():
                 )
                 favourite_ids = set(f[0] for f in favourites)
                 for r in restaurants['data']:
-                    r['is_favorite'] = r['element_id'] in favourite_ids
+                    r['is_favorite'] = r['elementId'] in favourite_ids
             else:
                 for r in restaurants['data']:
                     r['isFavorite'] = False
             return restaurants, 200
     except Exception as e:
+        logger.exception(e)
         logger.warning('Redis is not available to get data: %s', e)
 
     # Get the total count of restaurants
@@ -434,6 +435,7 @@ def get_restaurant(restaurant_id):
                 restaurant['isFavorite'] = False
             return schema.dump(restaurant), 200
     except Exception as e:
+        logger.exception(e)
         logger.warning('Redis is not available to get data: %s', e)
 
     # Get the restaurant details along with features, cuisines, price_levels, meal_types, and city
