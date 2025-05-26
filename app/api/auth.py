@@ -13,7 +13,7 @@ from marshmallow import ValidationError, fields, validates
 from sqlalchemy import select
 from werkzeug.security import check_password_hash
 
-from app.extensions import CamelCaseAutoSchema, CamelCaseSchema
+from app.extensions import ma
 from app.models import User, db
 from app.utils import get_redis
 
@@ -22,7 +22,7 @@ blueprint = Blueprint('auth', __name__, url_prefix='/auth')
 
 
 # Sign up
-class SignUpSchema(CamelCaseAutoSchema):
+class SignUpSchema(ma.SQLAlchemyAutoSchema):
     email = fields.Email(required=True)
     password = fields.String(load_only=True)
 
@@ -61,12 +61,12 @@ def sign_up():
 
 
 # Sign in
-class SignInRequestSchema(CamelCaseSchema):
+class SignInRequestSchema(ma.Schema):
     email = fields.Email(required=True, load_only=True)
     password = fields.String(required=True, load_only=True)
 
 
-class SignInResponseSchema(CamelCaseSchema):
+class SignInResponseSchema(ma.Schema):
     access_token = fields.String(required=True, dump_only=True)
     refresh_token = fields.String(required=True, dump_only=True)
 
@@ -90,7 +90,7 @@ def sign_in():
 
 
 # Refresh token
-class RefreshTokenResponseSchema(CamelCaseSchema):
+class RefreshTokenResponseSchema(ma.Schema):
     access_token = fields.String(required=True, dump_only=True)
 
 
@@ -105,7 +105,7 @@ def refresh_token():
 
 
 # Me
-class MeSchema(CamelCaseSchema):
+class MeSchema(ma.Schema):
     id = fields.UUID(dump_only=True)
     avatar = fields.String(dump_only=True)
     full_name = fields.String(dump_only=True)

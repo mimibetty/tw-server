@@ -7,7 +7,7 @@ from google.genai import types
 from marshmallow import fields
 
 from app.environments import GEMINI_API_KEY
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('conversations', __name__, url_prefix='/conversations')
@@ -21,7 +21,7 @@ SYSTEM_INSTRUCTION = """You are a friendly, enthusiastic chatbot for a Vietnam t
 For non-tourism questions, respond: "That's outside my Vietnam tourism focus." If unsure about a relevant detail, say: "I'm not certain, but check with local tourism offices or our website." Avoid fabricating details and ensure all suggestions are verifiable."""
 
 
-class RequestMessageSchema(CamelCaseSchema):
+class RequestMessageSchema(ma.Schema):
     message = fields.Str(required=True, validate=lambda x: len(x) > 0)
 
 

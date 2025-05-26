@@ -5,7 +5,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from marshmallow import fields
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import execute_neo4j_query
 
@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 blueprint = Blueprint('favourites', __name__, url_prefix='/favourites')
 
 
-class CitySchema(CamelCaseSchema):
+class CitySchema(ma.Schema):
     name = fields.String(dump_only=True)
     postal_code = fields.String(dump_only=True)
 
 
-class ShortPlaceSchema(CamelCaseSchema):
+class ShortPlaceSchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     city = fields.Nested(CitySchema)
@@ -74,7 +74,7 @@ def get_favourites():
     return jsonify(ShortPlaceSchema(many=True).dump(places)), 200
 
 
-class RequestSchema(CamelCaseSchema):
+class RequestSchema(ma.Schema):
     place_id = fields.String(required=True, load_only=True)
 
 

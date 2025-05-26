@@ -7,7 +7,7 @@ from marshmallow import fields
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.extensions import CamelCaseSchema
+from app.extensions import ma
 from app.models import Trip, UserTrip, db
 from app.utils import execute_neo4j_query
 
@@ -16,12 +16,12 @@ blueprint = Blueprint('trips', __name__, url_prefix='/trips')
 
 
 # Add schema classes for trip responses
-class CitySchema(CamelCaseSchema):
+class CitySchema(ma.Schema):
     name = fields.String(dump_only=True)
     postal_code = fields.String(dump_only=True)
 
 
-class TripPlaceSchema(CamelCaseSchema):
+class TripPlaceSchema(ma.Schema):
     city = fields.Nested(CitySchema, dump_only=True)
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
@@ -38,7 +38,7 @@ class TripPlaceSchema(CamelCaseSchema):
     order = fields.Integer(dump_only=True)
 
 
-class TripDetailsSchema(CamelCaseSchema):
+class TripDetailsSchema(ma.Schema):
     id = fields.String(dump_only=True)
     name = fields.String(dump_only=True)
     created_at = fields.String(dump_only=True)
@@ -177,7 +177,7 @@ def add_place_to_trip(trip_id):
         ), 201
 
     except SQLAlchemyError as e:
-        print("Error adding place to trip: ", e)
+        print('Error adding place to trip: ', e)
         db.session.rollback()
         logger.error(f'Error adding place to trip: {str(e)}')
         return jsonify({'error': 'Failed to add place to trip'}), 500
@@ -265,31 +265,31 @@ def get_trip_places(trip_id):
 
         # Get places in trip, ordered by order field (ascending)
         places = (
-            Trip.query.filter_by(trip_id=trip_id)
-            .order_by(Trip.order)
-            .all()
+            Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
         )
 
         if not places:
-            return jsonify({
-                'trip': {
-                    'id': str(user_trip.id),
-                    'name': user_trip.name,
-                    'isOptimized': user_trip.is_optimized,
-                    'createdAt': user_trip.created_at.isoformat(),
-                    'updatedAt': user_trip.updated_at.isoformat(),
-                    'userId': str(user_trip.user_id),
-                    'totalPlaces': 0,
-                    'totalDistance': None,
-                    'totalDistanceKm': None,
-                },
-                'places': [],
-            }), 200
+            return jsonify(
+                {
+                    'trip': {
+                        'id': str(user_trip.id),
+                        'name': user_trip.name,
+                        'isOptimized': user_trip.is_optimized,
+                        'createdAt': user_trip.created_at.isoformat(),
+                        'updatedAt': user_trip.updated_at.isoformat(),
+                        'userId': str(user_trip.user_id),
+                        'totalPlaces': 0,
+                        'totalDistance': None,
+                        'totalDistanceKm': None,
+                    },
+                    'places': [],
+                }
+            ), 200
 
         # Batch fetch place details from Neo4j
         place_ids = [place.place_id for place in places]
         place_details_map = {}
-        
+
         # Execute a single Neo4j query to get all places
         results = execute_neo4j_query(
             """
@@ -300,8 +300,8 @@ def get_trip_places(trip_id):
             """,
             {'place_ids': place_ids},
         )
-        print("place_ids", place_ids) 
-        print("results", results)
+        print('place_ids', place_ids)
+        print('results', results)
         # Process results and create a map of place_id to place details
         for result in results:
             place_data = result['p']
@@ -340,7 +340,10 @@ def get_trip_places(trip_id):
             place_data['element_id'] = place_id
 
             # Set default values for missing fields
-            if 'rating_histogram' not in place_data or not place_data['rating_histogram']:
+            if (
+                'rating_histogram' not in place_data
+                or not place_data['rating_histogram']
+            ):
                 place_data['rating_histogram'] = [0, 0, 0, 0, 0]
 
             if 'rating' not in place_data or place_data['rating'] is None:
