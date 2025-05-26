@@ -177,6 +177,7 @@ def add_place_to_trip(trip_id):
         ), 201
 
     except SQLAlchemyError as e:
+        print("Error adding place to trip: ", e)
         db.session.rollback()
         logger.error(f'Error adding place to trip: {str(e)}')
         return jsonify({'error': 'Failed to add place to trip'}), 500
@@ -264,30 +265,148 @@ def get_trip_places(trip_id):
 
         # Get places in trip, ordered by order field (ascending)
         places = (
-            Trip.query.filter_by(trip_id=trip_id).order_by(Trip.order).all()
+            Trip.query.filter_by(trip_id=trip_id)
+            .order_by(Trip.order)
+            .all()
         )
 
-        # Get place details from Neo4j
+        if not places:
+            return jsonify({
+                'trip': {
+                    'id': str(user_trip.id),
+                    'name': user_trip.name,
+                    'isOptimized': user_trip.is_optimized,
+                    'createdAt': user_trip.created_at.isoformat(),
+                    'updatedAt': user_trip.updated_at.isoformat(),
+                    'userId': str(user_trip.user_id),
+                    'totalPlaces': 0,
+                    'totalDistance': None,
+                    'totalDistanceKm': None,
+                },
+                'places': [],
+            }), 200
+
+        # Batch fetch place details from Neo4j
+        place_ids = [place.place_id for place in places]
+        place_details_map = {}
+        
+        # Execute a single Neo4j query to get all places
+        results = execute_neo4j_query(
+            """
+            MATCH (p)
+            WHERE elementId(p) IN $place_ids
+            OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
+            RETURN p, elementId(p) AS element_id, labels(p) AS types, c
+            """,
+            {'place_ids': place_ids},
+        )
+        print("place_ids", place_ids) 
+        print("results", results)
+        # Process results and create a map of place_id to place details
+        for result in results:
+            place_data = result['p']
+            place_id = result['element_id']
+            place_types = result['types']
+            city_data = result['c']
+
+            # Add city data if available
+            if city_data:
+                place_data['city'] = {
+                    'postal_code': city_data.get('postal_code', ''),
+                    'name': city_data.get('name', ''),
+                }
+
+            # Determine place type and standardize it
+            place_type = None
+            standardized_type = 'UNKNOWN'
+            for type_label in place_types:
+                if type_label == 'Hotel':
+                    place_type = type_label
+                    standardized_type = 'HOTEL'
+                    break
+                elif type_label == 'Restaurant':
+                    place_type = type_label
+                    standardized_type = 'RESTAURANT'
+                    break
+                elif type_label == 'ThingToDo':
+                    place_type = type_label
+                    standardized_type = 'THING-TO-DO'
+                    break
+
+            if not place_type:
+                place_type = place_data.get('type', 'Unknown')
+
+            place_data['type'] = standardized_type
+            place_data['element_id'] = place_id
+
+            # Set default values for missing fields
+            if 'rating_histogram' not in place_data or not place_data['rating_histogram']:
+                place_data['rating_histogram'] = [0, 0, 0, 0, 0]
+
+            if 'rating' not in place_data or place_data['rating'] is None:
+                rh = place_data.get('rating_histogram', [])
+                if rh and isinstance(rh, list) and len(rh) == 5:
+                    total = sum(rh)
+                    if total > 0:
+                        rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                        place_data['rating'] = round(rating, 1)
+                    else:
+                        place_data['rating'] = 0
+                else:
+                    place_data['rating'] = 0
+
+            # Convert camelCase keys to snake_case
+            camel_to_snake_mappings = {
+                'ratingHistogram': 'rating_histogram',
+                'rawRanking': 'raw_ranking',
+                'elementId': 'element_id',
+                'createdAt': 'created_at',
+                'updatedAt': 'updated_at',
+            }
+
+            for camel, snake in camel_to_snake_mappings.items():
+                if camel in place_data and snake not in place_data:
+                    place_data[snake] = place_data[camel]
+
+            # Filter fields to only include those from short schemas
+            common_fields = [
+                'element_id',
+                'city',
+                'email',
+                'image',
+                'latitude',
+                'longitude',
+                'name',
+                'rating',
+                'rating_histogram',
+                'raw_ranking',
+                'street',
+                'type',
+            ]
+
+            filtered_data = {
+                k: place_data.get(k) for k in common_fields if k in place_data
+            }
+            place_details_map[place_id] = filtered_data
+
+        # Combine place details with trip place data
         place_details = []
+        for place in places:
+            place_info = place_details_map.get(place.place_id)
+            if place_info:
+                place_info['order'] = place.order
+                place_info['createdAt'] = place.created_at.isoformat()
+                place_details.append(place_info)
+
+        # Calculate total distance only if trip is optimized and has enough places
         total_distance = None
         total_distance_km = None
-
-        if places:
-            for place in places:
-                # Try to get place details from Neo4j
-                place_info = get_place_details_from_neo4j(place.place_id)
-                if place_info:
-                    place_info['order'] = place.order
-                    place_info['createdAt'] = place.created_at.isoformat()
-                    place_details.append(place_info)
-
-            # Calculate total distance if trip is optimized
-            if user_trip.is_optimized and len(place_details) >= 2:
-                distance_matrix = calculate_distance_matrix(place_details)
-                total_distance = calculate_total_distance(
-                    range(len(place_details)), distance_matrix
-                )
-                total_distance_km = round(total_distance / 1000, 2)
+        if user_trip.is_optimized and len(place_details) >= 2:
+            distance_matrix = calculate_distance_matrix(place_details)
+            total_distance = calculate_total_distance(
+                range(len(place_details)), distance_matrix
+            )
+            total_distance_km = round(total_distance / 1000, 2)
 
         result = {
             'trip': {
