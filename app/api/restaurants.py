@@ -389,6 +389,12 @@ def get_restaurants():
 def get_restaurant(restaurant_id):
     schema = RestaurantSchema()
 
+    user_id = None
+    try:
+        user_id = get_jwt_identity()
+    except Exception:
+        pass
+
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'restaurants:{restaurant_id}'
