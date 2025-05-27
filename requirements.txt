@@ -42,6 +42,7 @@ numpy==2.2.6
 ortools==9.12.4544
 packaging==24.2
 pandas==2.2.3
+pgvector==0.4.1
 platformdirs==4.3.7
 pluggy==1.5.0
 pre_commit==4.2.0
