@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from werkzeug.security import generate_password_hash
@@ -117,3 +118,15 @@ class Trip(BaseModel):
     user_trip: Mapped[UserTrip] = relationship(
         'UserTrip', backref='trips', foreign_keys=[trip_id]
     )
+
+
+class VectorItem(BaseModel):
+    __tablename__ = 'vector_items'
+
+    place_id: Mapped[str] = mapped_column(primary_key=True)
+    embedding = mapped_column(Vector)
+
+    def __init__(self, place_id: str, embedding):
+        super().__init__()
+        self.place_id = place_id
+        self.embedding = embedding
