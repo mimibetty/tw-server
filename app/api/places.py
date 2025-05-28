@@ -1,13 +1,95 @@
+import json
 import logging
-from flask import Blueprint, jsonify
+
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.models import UserFavourite, UserReview, db
 from app.utils import execute_neo4j_query
+from app.models import UserFavourite, UserReview, db
 
 logger = logging.getLogger(__name__)
-blueprint = Blueprint('recommendations', __name__, url_prefix='/recommendations')
+blueprint = Blueprint('places', __name__, url_prefix='/places')
+
+@blueprint.get('/search')
+def search_place():
+    name = request.args.get('name', default='', type=str)
+    place_type = request.args.get('type', default='all', type=str).lower()
+    limit = request.args.get('limit', default=10, type=int)
+    if limit < 1 or limit > 100:
+        return {'error': 'Limit must be between 1 and 100'}, 400
+
+    queries = []
+
+    if place_type in ['thingtodo', 'thing-to-do', 'thing_to_do']:
+        queries.append(
+            """
+            MATCH (p:ThingToDo)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'thingtodo' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+    elif place_type == 'hotel':
+        queries.append(
+            """
+            MATCH (p:Hotel)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'hotel' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+    elif place_type == 'restaurant':
+        queries.append(
+            """
+            MATCH (p:Restaurant)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'restaurant' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+    elif place_type == 'all':
+        queries.append(
+            """
+            MATCH (p:ThingToDo)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'thingtodo' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+        queries.append(
+            """
+            MATCH (p:Hotel)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'hotel' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+        queries.append(
+            """
+            MATCH (p:Restaurant)-[:LOCATED_IN]->(c:City)
+            WHERE toLower(p.name) CONTAINS toLower($name)
+            RETURN p AS place, elementId(p) AS element_id, c AS city, 'restaurant' AS type, p.raw_ranking AS raw_ranking
+            """
+        )
+    else:
+        return {'error': 'Invalid type. Must be one of hotel, restaurant, thingtodo, all.'}, 400
+
+    # Collect results from all queries
+    results = []
+    for q in queries:
+        res = execute_neo4j_query(q, {'name': name})
+        results.extend(res)
+
+    # Sort by raw_ranking descending and limit
+    results = sorted(results, key=lambda x: x.get('raw_ranking', 0), reverse=True)[:limit]
+
+    # Format response
+    response_data = []
+    for r in results:
+        place = r['place']
+        place['element_id'] = r['element_id']
+        place['city'] = r['city']
+        place['type'] = r['type']
+        place['raw_ranking'] = r.get('raw_ranking', 0)
+        response_data.append(place)
+
+    return {'data': response_data, 'total': len(response_data)}, 200
 
 def calculate_similarity_score(place1, place2):
     """Calculate similarity score between two places based on their attributes."""
@@ -29,12 +111,11 @@ def calculate_similarity_score(place1, place2):
     
     return score
 
-@blueprint.get('/')
+@blueprint.get('/recommendations')
 @jwt_required()
 def get_recommendations():
     """Get personalized thing-to-do recommendations based on user favorites and ratings."""
     user_id = get_jwt_identity()
-    print("user_id", user_id)
 
     try:
         # Get user's favorite places and rated places
@@ -63,14 +144,14 @@ def get_recommendations():
             {'place_ids': list(user_place_ids)},
         )
         
-        for result in results:
-            place_data = result['p']
-            place_id = result['element_id']
+        for result_item in results:
+            place_data = result_item['p']
+            place_id = result_item['element_id']
             place_data['element_id'] = place_id
             user_places.append(place_data)
         
         # Get all things-to-do places from Neo4j (excluding user's places)
-        all_places = execute_neo4j_query(
+        all_places_results = execute_neo4j_query(
             """
             MATCH (p:ThingToDo)
             WHERE NOT elementId(p) IN $user_place_ids
@@ -81,17 +162,20 @@ def get_recommendations():
         
         # Calculate similarity scores for each place
         recommendations = []
-        for result in all_places:
-            place_data = result['p']
-            place_id = result['element_id']
+        for result_item in all_places_results:
+            place_data = result_item['p']
+            place_id = result_item['element_id']
             place_data['element_id'] = place_id
             
             # Calculate average similarity score with user's places
-            similarity_scores = [
-                calculate_similarity_score(place_data, user_place)
-                for user_place in user_places
-            ]
-            avg_similarity = sum(similarity_scores) / len(similarity_scores)
+            if not user_places:
+                avg_similarity = 0
+            else:
+                similarity_scores = [
+                    calculate_similarity_score(place_data, user_place)
+                    for user_place in user_places
+                ]
+                avg_similarity = sum(similarity_scores) / len(similarity_scores)
             
             # Add rating as a factor (30% weight)
             rating = place_data.get('rating', 0)
@@ -144,12 +228,12 @@ def get_popular_things_to_do():
             """
         )
         
-        popular_places = []
-        for result in results:
-            place_data = result['p']
-            place_id = result['element_id']
+        popular_places_data = []
+        for result_item in results:
+            place_data = result_item['p']
+            place_id = result_item['element_id']
             
-            popular_places.append({
+            popular_places_data.append({
                 'id': place_id,
                 'name': place_data.get('name', ''),
                 'rating': place_data.get('rating', 0),
@@ -159,8 +243,8 @@ def get_popular_things_to_do():
             })
         
         return jsonify({
-            'recommendations': popular_places,
-            'total': len(popular_places)
+            'recommendations': popular_places_data,
+            'total': len(popular_places_data)
         }), 200
         
     except Exception as e:

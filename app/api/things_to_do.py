@@ -48,7 +48,7 @@ class ShortThingToDoSchema(ma.Schema):
     rating_histogram = fields.List(
         fields.Integer(), required=False, default=list
     )
-    raw_ranking = fields.Float(required=True, load_only=True)
+    raw_ranking = fields.Float(required=True)
     street = fields.String(required=False, allow_none=True)
     type = fields.String(dump_only=True, default='THING-TO-DO')
 
@@ -415,3 +415,5 @@ def get_thing_to_do(thing_to_do_id):
         logger.warning('Redis is not available to set data: %s', e)
 
     return schema.dump(thing_to_do), 200
+
+
