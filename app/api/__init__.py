@@ -13,8 +13,8 @@ from .hotels import blueprint as hotels_blueprint
 from .restaurants import blueprint as restaurants_blueprint
 from .things_to_do import blueprint as things_to_do_blueprint
 from .trips import blueprint as trips_blueprint
-from .recommendations import blueprint as recommendations_blueprint
 from .reviews import blueprint as reviews_blueprint
+from .places import blueprint as places_blueprint
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('api', __name__, url_prefix='/api')
@@ -28,8 +28,8 @@ blueprint.register_blueprint(hotels_blueprint)
 blueprint.register_blueprint(restaurants_blueprint)
 blueprint.register_blueprint(things_to_do_blueprint)
 blueprint.register_blueprint(trips_blueprint)
-blueprint.register_blueprint(recommendations_blueprint)
 blueprint.register_blueprint(reviews_blueprint)
+blueprint.register_blueprint(places_blueprint)
 
 def unauthorized_handler(_):
     return {'error': 'Unauthorized'}, 401
