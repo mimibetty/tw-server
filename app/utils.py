@@ -1,4 +1,5 @@
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -180,4 +181,54 @@ def check_place_exists(place_id: str) -> bool:
         return result[0]['count'] > 0
     except Exception as e:
         logger.error(f"Error checking place existence: {str(e)}")
+        return False
+
+
+def update_user_preference_cache(user_id: str):
+    """
+    Update cached user preferences when user adds favorites or reviews.
+    This helps keep recommendations fresh and personalized.
+    
+    Args:
+        user_id: The ID of the user whose preferences need updating
+    """
+    try:
+        redis = get_redis()
+        
+        # Clear cached recommendations for this user
+        pattern = f"recommendations:{user_id}:*"
+        keys_to_delete = redis.keys(pattern)
+        if keys_to_delete:
+            redis.delete(*keys_to_delete)
+            logger.info(f"Cleared {len(keys_to_delete)} cached recommendations for user {user_id}")
+        
+        # Optionally pre-compute and cache user preferences
+        from app.models import UserFavourite, UserReview, db
+        
+        # Get user's favorites and reviews
+        favorites_result = db.session.execute(
+            db.text("SELECT place_id FROM user_favourites WHERE user_id = :user_id"),
+            {'user_id': user_id}
+        )
+        favorite_place_ids = [row.place_id for row in favorites_result]
+        
+        reviews_result = db.session.execute(
+            db.text("SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id"),
+            {'user_id': user_id}
+        )
+        reviews = {row.place_id: row.rating for row in reviews_result}
+        
+        # Cache user interaction summary
+        interaction_summary = {
+            'favorite_count': len(favorite_place_ids),
+            'review_count': len(reviews),
+            'avg_rating': sum(reviews.values()) / len(reviews) if reviews else 0.0,
+            'last_updated': db.session.execute(db.text("SELECT NOW()")).scalar().isoformat()
+        }
+        
+        redis.setex(f"user_summary:{user_id}", 3600, json.dumps(interaction_summary))
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user preference cache: {str(e)}")
         return False

@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 import json
 
 from app.models import UserReview, User, db
-from app.utils import update_place_rating_histogram, check_place_exists, get_redis
+from app.utils import update_place_rating_histogram, check_place_exists, get_redis, update_user_preference_cache
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('reviews', __name__, url_prefix='/reviews')
@@ -142,6 +142,9 @@ def create_review(place_id):
         # Invalidate caches
         invalidate_caches(place_id)
 
+        # Update user recommendation cache
+        update_user_preference_cache(user_id)
+
         return jsonify({
             'id': str(review.id),
             'user': {
@@ -271,6 +274,9 @@ def update_review(place_id):
         # Invalidate caches
         invalidate_caches(place_id)
 
+        # Update user recommendation cache
+        update_user_preference_cache(user_id)
+
         return jsonify({
             'id': str(review.id),
             'user': {
@@ -319,6 +325,9 @@ def delete_review(place_id):
 
         # Invalidate caches
         invalidate_caches(place_id)
+
+        # Update user recommendation cache
+        update_user_preference_cache(user_id)
 
         return jsonify({'message': 'Review deleted successfully'}), 200
 

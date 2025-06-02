@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 
 from flask_sqlalchemy import SQLAlchemy
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, backref
 from werkzeug.security import generate_password_hash
 
 from app.environments import TIMEZONE
@@ -40,6 +40,8 @@ class User(BaseModel):
     is_verified: Mapped[bool] = mapped_column(default=False)
     full_name: Mapped[str] = mapped_column(nullable=False)
     password: Mapped[str] = mapped_column(nullable=False)
+    birthday: Mapped[date] = mapped_column(nullable=True)
+    phone_number: Mapped[str] = mapped_column(nullable=True)
 
     def __setattr__(self, key, value):
         if key == 'password' and value is not None:
@@ -51,13 +53,15 @@ class UserFavourite(BaseModel):
     __tablename__ = 'user_favourites'
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('users.id'), nullable=False
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False
     )
     place_id: Mapped[str] = mapped_column(nullable=False)
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', backref='user_favourites', foreign_keys=[user_id]
+        'User', 
+        backref=backref('user_favourites', cascade='all, delete-orphan'),
+        foreign_keys=[user_id]
     )
 
     def __init__(self, user_id: uuid.UUID, place_id: str) -> None:
@@ -70,7 +74,7 @@ class UserReview(BaseModel):
     __tablename__ = 'user_reviews'
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('users.id'), nullable=False
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False
     )
     place_id: Mapped[str] = mapped_column(nullable=False)
     review: Mapped[str] = mapped_column(nullable=False)
@@ -78,7 +82,9 @@ class UserReview(BaseModel):
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', backref='user_reviews', foreign_keys=[user_id]
+        'User', 
+        backref=backref('user_reviews', cascade='all, delete-orphan'),
+        foreign_keys=[user_id]
     )
 
     # Constraints
@@ -94,14 +100,16 @@ class UserTrip(BaseModel):
     __tablename__ = 'user_trips'
 
     user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('users.id'), nullable=False
+        ForeignKey('users.id', ondelete='CASCADE'), nullable=False
     )
     name: Mapped[str] = mapped_column(nullable=False)
     is_optimized: Mapped[bool] = mapped_column(default=False)
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', backref='user_trips', foreign_keys=[user_id]
+        'User', 
+        backref=backref('user_trips', cascade='all, delete-orphan'),
+        foreign_keys=[user_id]
     )
 
 
@@ -109,14 +117,16 @@ class Trip(BaseModel):
     __tablename__ = 'trips'
 
     trip_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey('user_trips.id'), nullable=False
+        ForeignKey('user_trips.id', ondelete='CASCADE'), nullable=False
     )
     place_id: Mapped[str] = mapped_column(nullable=False)
     order: Mapped[int] = mapped_column(nullable=False, default=0)
 
     # Relationships
     user_trip: Mapped[UserTrip] = relationship(
-        'UserTrip', backref='trips', foreign_keys=[trip_id]
+        'UserTrip', 
+        backref=backref('trips', cascade='all, delete-orphan'),
+        foreign_keys=[trip_id]
     )
 
 
