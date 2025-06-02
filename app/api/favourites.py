@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import execute_neo4j_query
+from app.utils import execute_neo4j_query, update_user_preference_cache
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('favourites', __name__, url_prefix='/favourites')
@@ -100,6 +100,9 @@ def add_favourite():
     db.session.add(favourite)
     db.session.commit()
 
+    # Update user recommendation cache
+    update_user_preference_cache(user_id)
+
     return {'success': True}, 201
 
 
@@ -122,6 +125,9 @@ def delete_favourite(place_id):
 
         db.session.delete(favourite)
         db.session.commit()
+
+        # Update user recommendation cache
+        update_user_preference_cache(user_id)
 
         return jsonify(
             {'message': 'Place removed from favourites successfully'}
