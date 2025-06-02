@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 import json
 
 from app.models import UserReview, User, db
-from app.utils import update_place_rating_histogram, check_place_exists, get_redis, update_user_preference_cache
+from app.utils import update_place_rating_histogram, check_place_exists, get_redis, update_user_preference_cache,create_paging
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('reviews', __name__, url_prefix='/reviews')
@@ -174,21 +174,43 @@ def create_review(place_id):
 
 @blueprint.get('/<string:place_id>')
 def get_place_reviews(place_id):
-    """Get all reviews for a place."""
+    """Get all reviews for a place with pagination."""
+    # Get pagination parameters
+    page = request.args.get('page', default=1, type=int)
+    size = request.args.get('size', default=10, type=int)
+    
+    # Validate pagination parameters
+    if page < 1:
+        return jsonify({'error': 'Page must be greater than 0'}), 400
+    if size < 1 or size > 100:
+        return jsonify({'error': 'Size must be between 1 and 100'}), 400
+    
+    offset = (page - 1) * size
+
     # Check if place exists in Neo4j
     if not check_place_exists(place_id):
         return jsonify({'error': 'Place not found'}), 404
 
     # Try to get from cache first
-    cached_reviews = get_cached_reviews(place_id)
+    cache_key = f'reviews:{place_id}:page={page}:size={size}'
+    cached_reviews = get_cached_reviews(cache_key)
     if cached_reviews is not None:
         return jsonify(cached_reviews), 200
 
     try:
-        # Join UserReview with User to get user details
+        # Get total count for pagination
+        total_count = db.session.query(UserReview).filter(
+            UserReview.place_id == place_id
+        ).count()
+
+        # Join UserReview with User to get user details with pagination
         reviews = db.session.query(UserReview, User).join(
             User, UserReview.user_id == User.id
-        ).filter(UserReview.place_id == place_id).all()
+        ).filter(
+            UserReview.place_id == place_id
+        ).order_by(
+            UserReview.created_at.desc()
+        ).offset(offset).limit(size).all()
         
         reviews_data = [{
             'id': str(review.id),
@@ -203,10 +225,19 @@ def get_place_reviews(place_id):
             'updated_at': review.updated_at.isoformat()
         } for review, user in reviews]
 
-        # Cache the reviews
-        cache_reviews(place_id, reviews_data)
+        # Create paginated response
+        response = create_paging(
+            data=reviews_data,
+            page=page,
+            size=size,
+            offset=offset,
+            total_count=total_count
+        )
+
+        # Cache the paginated response
+        cache_reviews(cache_key, response)
         
-        return jsonify(reviews_data), 200
+        return jsonify(response), 200
 
     except SQLAlchemyError as e:
         logger.error(f'Error fetching reviews: {str(e)}')
