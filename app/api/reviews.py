@@ -172,6 +172,8 @@ def create_review(place_id):
         logger.error(f'Error creating review: {str(e)}')
         return jsonify({'error': 'Failed to create review'}), 500
 
+
+
 @blueprint.get('/<string:place_id>')
 def get_place_reviews(place_id):
     """Get all reviews for a place with pagination and sorting."""
@@ -244,7 +246,8 @@ def get_place_reviews(place_id):
             'id': str(review.id),
             'user': {
                 'full_name': user.full_name,
-                'avatar': user.avatar
+                'avatar': user.avatar,
+                'user_id': str(user.id)
             },
             'place_id': review.place_id,
             'rating': review.rating,
@@ -270,6 +273,7 @@ def get_place_reviews(place_id):
     except SQLAlchemyError as e:
         logger.error(f'Error fetching reviews: {str(e)}')
         return jsonify({'error': 'Failed to fetch reviews'}), 500
+
 
 @blueprint.patch('/<string:place_id>')
 @jwt_required()
