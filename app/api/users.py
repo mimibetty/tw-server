@@ -157,6 +157,7 @@ class UserQuerySchema(ma.Schema):
     )
 
 
+
 @blueprint.get('/')
 @jwt_required()
 def get_users():
@@ -231,7 +232,6 @@ def get_user_detail(user_id):
         
         if not user:
             return jsonify({'error': 'User not found'}), 404
-
         # Serialize user data (excluding password)
         user_schema = UserSchema(exclude=['password'])
         user_data = user_schema.dump(user)
@@ -367,27 +367,6 @@ def delete_user(user_id):
         return jsonify({'error': 'Failed to delete user'}), 500
 
 
-@blueprint.get('/me')
-@jwt_required()
-def get_current_user():
-    """Get current authenticated user's information."""
-    try:
-        user_id = get_jwt_identity()
-        user = User.query.filter_by(id=user_id).first()
-        
-        if not user:
-            return jsonify({'error': 'User not found'}), 404
-
-        # Serialize user data (excluding password)
-        user_schema = UserSchema(exclude=['password'])
-        user_data = user_schema.dump(user)
-
-        return jsonify(user_data), 200
-
-    except Exception as e:
-        logger.error(f"Error getting current user: {str(e)}")
-        return jsonify({'error': 'Failed to get user information'}), 500
-
 
 @blueprint.patch('/me')
 @jwt_required()
@@ -437,3 +416,26 @@ def update_current_user():
         db.session.rollback()
         logger.error(f'Error updating user: {str(e)}')
         return jsonify({'error': 'Failed to update user'}), 500 
+    
+
+    
+@blueprint.get('/me')
+@jwt_required()
+def get_current_user():
+    """Get current authenticated user's information."""
+    try:
+        user_id = get_jwt_identity()
+        user = User.query.filter_by(id=user_id).first()
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Serialize user data (excluding password)
+        user_schema = UserSchema(exclude=['password'])
+        user_data = user_schema.dump(user)
+
+        return jsonify(user_data), 200
+
+    except Exception as e:
+        logger.error(f"Error getting current user: {str(e)}")
+        return jsonify({'error': 'Failed to get user information'}), 500

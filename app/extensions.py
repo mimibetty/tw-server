@@ -13,5 +13,5 @@ migrate = Migrate()
 cors = CORS(
     supports_credentials=True,
     resources={r'/api/*': {'origins': '*'}},
-    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 )
