@@ -174,10 +174,14 @@ def create_review(place_id):
 
 @blueprint.get('/<string:place_id>')
 def get_place_reviews(place_id):
-    """Get all reviews for a place with pagination."""
+    """Get all reviews for a place with pagination and sorting."""
     # Get pagination parameters
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
+    
+    # Get sorting parameters
+    sort_by = request.args.get('sort_by', default='created_at', type=str)
+    order = request.args.get('order', default='desc', type=str)
     
     # Validate pagination parameters
     if page < 1:
@@ -185,14 +189,24 @@ def get_place_reviews(place_id):
     if size < 1 or size > 100:
         return jsonify({'error': 'Size must be between 1 and 100'}), 400
     
+    # Validate sorting parameters
+    valid_sort_fields = ['rating', 'updated_at', 'created_at']
+    valid_orders = ['asc', 'desc']
+    
+    if sort_by not in valid_sort_fields:
+        return jsonify({'error': f'Invalid sort_by. Must be one of: {", ".join(valid_sort_fields)}'}), 400
+    
+    if order not in valid_orders:
+        return jsonify({'error': f'Invalid order. Must be one of: {", ".join(valid_orders)}'}), 400
+
     offset = (page - 1) * size
 
     # Check if place exists in Neo4j
     if not check_place_exists(place_id):
         return jsonify({'error': 'Place not found'}), 404
 
-    # Try to get from cache first
-    cache_key = f'reviews:{place_id}:page={page}:size={size}'
+    # Include sorting parameters in cache key
+    cache_key = f'reviews:{place_id}:page={page}:size={size}:sort={sort_by}:order={order}'
     cached_reviews = get_cached_reviews(cache_key)
     if cached_reviews is not None:
         return jsonify(cached_reviews), 200
@@ -203,14 +217,28 @@ def get_place_reviews(place_id):
             UserReview.place_id == place_id
         ).count()
 
-        # Join UserReview with User to get user details with pagination
-        reviews = db.session.query(UserReview, User).join(
+        # Build the query with sorting
+        query = db.session.query(UserReview, User).join(
             User, UserReview.user_id == User.id
         ).filter(
             UserReview.place_id == place_id
-        ).order_by(
-            UserReview.created_at.desc()
-        ).offset(offset).limit(size).all()
+        )
+        
+        # Apply sorting
+        if sort_by == 'rating':
+            sort_column = UserReview.rating
+        elif sort_by == 'updated_at':
+            sort_column = UserReview.updated_at
+        else:  # created_at (default)
+            sort_column = UserReview.created_at
+        
+        if order == 'asc':
+            query = query.order_by(sort_column.asc())
+        else:  # desc (default)
+            query = query.order_by(sort_column.desc())
+        
+        # Apply pagination
+        reviews = query.offset(offset).limit(size).all()
         
         reviews_data = [{
             'id': str(review.id),
