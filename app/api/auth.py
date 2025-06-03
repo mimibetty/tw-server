@@ -10,11 +10,11 @@ from flask_jwt_extended import (
     jwt_required,
 )
 from marshmallow import ValidationError, fields, validates
-from sqlalchemy import select
+from sqlalchemy import select, func
 from werkzeug.security import check_password_hash
 
 from app.extensions import ma
-from app.models import User, db
+from app.models import User, db, UserFavourite, UserReview, UserTrip
 from app.utils import get_redis
 
 logger = logging.getLogger(__name__)
@@ -107,9 +107,15 @@ def refresh_token():
 # Me
 class MeSchema(ma.Schema):
     id = fields.UUID(dump_only=True)
-    avatar = fields.String(dump_only=True)
-    full_name = fields.String(dump_only=True)
+    avatar = fields.String(dump_only=True, allow_none=True)
+    email = fields.Email(dump_only=True)
     is_admin = fields.Boolean(dump_only=True)
+    is_verified = fields.Boolean(dump_only=True)
+    full_name = fields.String(dump_only=True)
+    birthday = fields.Date(dump_only=True, allow_none=True)
+    phone_number = fields.String(dump_only=True, allow_none=True)
+    created_at = fields.DateTime(dump_only=True)
+    updated_at = fields.DateTime(dump_only=True)
 
 
 @blueprint.get('/me/')
@@ -133,8 +139,27 @@ def get_me():
     if type(user) is not User:
         return {'error': 'User not found'}, 404
 
-    # Cache the user data in Redis in 6 hours
+    # Get user data
     response = MeSchema().dump(user)
+    
+    # Add user statistics
+    # Get user statistics
+    favorites_count = db.session.query(UserFavourite).filter_by(user_id=user_id).count()
+    reviews_count = db.session.query(UserReview).filter_by(user_id=user_id).count()
+    trips_count = db.session.query(UserTrip).filter_by(user_id=user_id).count()
+    
+    # Get average rating given by user
+    avg_rating_result = db.session.query(func.avg(UserReview.rating)).filter_by(user_id=user_id).scalar()
+    avg_rating = round(float(avg_rating_result), 1) if avg_rating_result else 0.0
+    
+    response['statistics'] = {
+        'favorites_count': favorites_count,
+        'reviews_count': reviews_count,
+        'trips_count': trips_count,
+        'average_rating_given': avg_rating
+    }
+
+    # Cache the user data in Redis in 6 hours
     try:
         redis.set(redis_key, json.dumps(response), ex=21600)
     except Exception as e:
