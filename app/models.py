@@ -104,6 +104,7 @@ class UserTrip(BaseModel):
     )
     name: Mapped[str] = mapped_column(nullable=False)
     is_optimized: Mapped[bool] = mapped_column(default=False)
+    trip_status: Mapped[bool] = mapped_column(default=False)  # False = "Upcoming", True = "Done"
 
     # Relationships
     user: Mapped[User] = relationship(

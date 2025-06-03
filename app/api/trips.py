@@ -64,6 +64,7 @@ def create_user_trip():
             user_id=user_id,
             name=data['name'].strip(),
             is_optimized=data.get('isOptimized', False),
+            trip_status=data.get('status', False),  # False = "Upcoming", True = "Done"
         )
 
         db.session.add(user_trip)
@@ -75,6 +76,8 @@ def create_user_trip():
                 'user_id': str(user_trip.user_id),
                 'name': user_trip.name,
                 'is_optimized': user_trip.is_optimized,
+                'status': user_trip.trip_status,
+                'status_text': "Done" if user_trip.trip_status else "Upcoming",
                 'created_at': user_trip.created_at.isoformat(),
                 'updated_at': user_trip.updated_at.isoformat(),
             }
@@ -90,12 +93,30 @@ def create_user_trip():
 def get_user_trips():
     """Get all user trips for the authenticated user."""
     user_id = get_jwt_identity()
+    
+    # Get search parameters
+    search_name = request.args.get('name', '').strip()
+    status = request.args.get('status')
+    if status is not None:
+        try:
+            status = bool(int(status))  # Convert '0' to False, '1' to True
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Status must be 0 (Upcoming) or 1 (Done)'}), 400
+    
     try:
-        user_trips = (
-            UserTrip.query.filter_by(user_id=user_id)
-            .order_by(UserTrip.created_at.desc())
-            .all()
-        )
+        # Build query with filters
+        query = UserTrip.query.filter_by(user_id=user_id)
+        
+        # Apply name search if provided
+        if search_name:
+            query = query.filter(UserTrip.name.ilike(f'%{search_name}%'))
+            
+        # Apply status filter if provided
+        if status is not None:
+            query = query.filter(UserTrip.trip_status == status)
+            
+        # Order by creation date
+        user_trips = query.order_by(UserTrip.created_at.desc()).all()
 
         result = []
         for trip in user_trips:
@@ -129,6 +150,8 @@ def get_user_trips():
                     'updated_at': trip.updated_at.isoformat(),
                     'place_count': len(trip.trips),
                     'is_optimized': trip.is_optimized,
+                    'status': trip.trip_status,
+                    'status_text': "Done" if trip.trip_status else "Upcoming",
                     'numberHotel': number_hotel,
                     'numberRestaurant': number_restaurant,
                     'numberThingtodo': number_thingtodo,
@@ -242,8 +265,13 @@ def update_user_trip(trip_id):
     user_id = get_jwt_identity()
     data = request.json
 
-    if not data or 'name' not in data:
-        return jsonify({'error': 'Name is required'}), 400
+    if not data:
+        return jsonify({'error': 'No update data provided'}), 400
+
+    # Check for at least one valid field
+    valid_fields = ['name', 'status']
+    if not any(field in data for field in valid_fields):
+        return jsonify({'error': f'At least one of these fields is required: {", ".join(valid_fields)}'}), 400
 
     try:
         user_trip = UserTrip.query.filter_by(
@@ -253,13 +281,30 @@ def update_user_trip(trip_id):
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
 
-        user_trip.name = data['name']
+        # Update name if provided
+        if 'name' in data and data['name']:
+            user_trip.name = data['name'].strip()
+            
+        # Update status if provided
+        if 'status' in data:
+            try:
+                # Allow both boolean and integer values
+                if isinstance(data['status'], bool):
+                    user_trip.trip_status = data['status']
+                else:
+                    user_trip.trip_status = bool(int(data['status']))  # Convert 0/1 to False/True
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Status must be 0 (Upcoming) or 1 (Done)'}), 400
+
         db.session.commit()
 
         return jsonify(
             {
                 'id': str(user_trip.id),
                 'name': user_trip.name,
+                'status': user_trip.trip_status,
+                'status_text': "Done" if user_trip.trip_status else "Upcoming",
+                'is_optimized': user_trip.is_optimized,
                 'created_at': user_trip.created_at.isoformat(),
                 'updated_at': user_trip.updated_at.isoformat(),
             }
@@ -298,6 +343,8 @@ def get_trip_places(trip_id):
                         'id': str(user_trip.id),
                         'name': user_trip.name,
                         'isOptimized': user_trip.is_optimized,
+                        'status': user_trip.trip_status,
+                        'statusText': "Done" if user_trip.trip_status else "Upcoming",
                         'createdAt': user_trip.created_at.isoformat(),
                         'updatedAt': user_trip.updated_at.isoformat(),
                         'userId': str(user_trip.user_id),
@@ -448,6 +495,8 @@ def get_trip_places(trip_id):
                 'id': str(user_trip.id),
                 'name': user_trip.name,
                 'isOptimized': user_trip.is_optimized,
+                'status': user_trip.trip_status,
+                'statusText': "Done" if user_trip.trip_status else "Upcoming",
                 'createdAt': user_trip.created_at.isoformat(),
                 'updatedAt': user_trip.updated_at.isoformat(),
                 'userId': str(user_trip.user_id),
@@ -891,6 +940,8 @@ def optimize_trip(trip_id):
             {
                 'message': 'Trip optimized successfully',
                 'isOptimized': True,
+                'status': user_trip.trip_status,
+                'statusText': "Done" if user_trip.trip_status else "Upcoming",
                 'totalDistance': total_distance,  # in meters
                 'totalDistanceKm': round(
                     total_distance / 1000, 2
