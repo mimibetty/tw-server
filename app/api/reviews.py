@@ -4,6 +4,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import joinedload
 import json
+import time
 
 from app.models import UserReview, User, db
 from app.utils import update_place_rating_histogram, check_place_exists, get_redis, update_user_preference_cache,create_paging
@@ -11,9 +12,29 @@ from app.utils import update_place_rating_histogram, check_place_exists, get_red
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('reviews', __name__, url_prefix='/reviews')
 
-def get_reviews_cache_key(place_id: str) -> str:
-    """Generate Redis cache key for place reviews."""
-    return f"reviews:{place_id}"
+def get_reviews_cache_key(place_id: str, **params) -> str:
+    """Generate Redis cache key for place reviews with all query parameters."""
+    base_key = f"url:/reviews/{place_id}"
+    if not params:
+        return base_key
+    
+    query_params = []
+    for key, value in sorted(params.items()):
+        query_params.append(f"{key}={value}")
+    
+    return f"{base_key}?{'&'.join(query_params)}"
+
+def get_all_reviews_cache_key(**params) -> str:
+    """Generate Redis cache key for all reviews listing."""
+    base_key = "url:/reviews/all"
+    if not params:
+        return base_key
+    
+    query_params = []
+    for key, value in sorted(params.items()):
+        query_params.append(f"{key}={value}")
+    
+    return f"{base_key}?{'&'.join(query_params)}"
 
 def get_place_cache_key(place_type: str, place_id: str) -> str:
     """Generate Redis cache key for place based on type."""
@@ -22,63 +43,74 @@ def get_place_cache_key(place_type: str, place_id: str) -> str:
         return f"things-to-do:{place_id}"
     return f"{place_type}s:{place_id}"
 
-def cache_reviews(place_id: str, reviews: list):
-    """Cache reviews in Redis."""
-    try:
-        redis = get_redis()
-        cache_key = get_reviews_cache_key(place_id)
-        # Cache for 6 hours (21600 seconds)
-        redis.setex(cache_key, 21600, json.dumps(reviews))
-    except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
-def get_cached_reviews(place_id: str) -> list:
+def get_cached_reviews(cache_key: str) -> dict:
     """Get cached reviews from Redis."""
+    start_time = time.time()
     try:
         redis = get_redis()
-        cache_key = get_reviews_cache_key(place_id)
         cached_data = redis.get(cache_key)
-        return json.loads(cached_data) if cached_data else None
+        result = json.loads(cached_data) if cached_data else None
+        
+        # Log cache hit/miss for debugging
+        elapsed = time.time() - start_time
+        if result:
+            logger.debug(f"CACHE HIT: {cache_key} in {elapsed:.3f}s")
+        else:
+            logger.debug(f"CACHE MISS: {cache_key} in {elapsed:.3f}s")
+            
+        return result
     except Exception as e:
-        logger.warning('Redis is not available to get data: %s', e)
+        logger.warning('Redis cache retrieval error: %s', e)
         return None
 
-def invalidate_caches(place_id: str):
-    """Invalidate both reviews and place caches."""
+def cache_reviews(cache_key: str, reviews: dict, expire_seconds: int = 3600):
+    """Cache reviews in Redis with configurable expiry."""
+    start_time = time.time()
     try:
         redis = get_redis()
-        # Invalidate reviews cache
-        reviews_cache_key = get_reviews_cache_key(place_id)
+        # Cache for specified time (default: 1 hour)
+        redis.setex(cache_key, expire_seconds, json.dumps(reviews))
+        elapsed = time.time() - start_time
+        logger.debug(f"CACHE SET: {cache_key} in {elapsed:.3f}s (expires in {expire_seconds}s)")
+    except Exception as e:
+        logger.warning('Redis cache storage error: %s', e)
+
+def invalidate_caches(place_id: str):
+    """Invalidate review-related caches efficiently."""
+    start_time = time.time()
+    try:
+        redis = get_redis()
+        keys_to_delete = []
         
-        # Invalidate place caches for all types
-        place_cache_keys = [
+        # Add specific place review cache keys
+        place_review_pattern = f"url:/reviews/{place_id}*"
+        place_keys = redis.keys(place_review_pattern)
+        if place_keys:
+            keys_to_delete.extend(place_keys)
+        
+        # Add place data cache keys
+        place_data_keys = [
             f'hotels:{place_id}',
             f'restaurants:{place_id}',
             f'things-to-do:{place_id}'
         ]
+        keys_to_delete.extend(place_data_keys)
         
-        # Delete review cache and all place caches
-        redis.delete(reviews_cache_key, *place_cache_keys)
-        
-        # Also invalidate list caches for all place types
-        patterns = [
-            'hotels:*',
-            'restaurants:*',
-            'things-to-do:*'
-        ]
-        
-        for pattern in patterns:
-            keys_to_delete = redis.keys(pattern)
-            if keys_to_delete:
-                redis.delete(*keys_to_delete)
-                
-        # Invalidate any cached place data that might include ratings
-        rating_pattern = f'*:{place_id}'
-        rating_keys = redis.keys(rating_pattern)
-        if rating_keys:
-            redis.delete(*rating_keys)
+        # Delete all keys in a single operation if we have any
+        if keys_to_delete:
+            redis.delete(*keys_to_delete)
+            elapsed = time.time() - start_time
+            logger.debug(f"CACHE INVALIDATED: {len(keys_to_delete)} keys for place {place_id} in {elapsed:.3f}s")
+            
+        # Invalidate all reviews cache - but only if needed
+        all_reviews_pattern = "url:/reviews/all*"
+        all_reviews_keys = redis.keys(all_reviews_pattern)
+        if all_reviews_keys:
+            redis.delete(*all_reviews_keys)
+            logger.debug(f"CACHE INVALIDATED: {len(all_reviews_keys)} all-reviews keys")
+            
     except Exception as e:
-        logger.warning('Redis is not available to delete data: %s', e)
+        logger.warning('Redis cache invalidation error: %s', e)
 
 @blueprint.post('/<string:place_id>')
 @jwt_required()
@@ -117,6 +149,7 @@ def create_review(place_id):
         return jsonify({'error': 'User not found. Please log in again.'}), 401
 
     try:
+        start_time = time.time()
         # Check if user already reviewed this place
         existing_review = UserReview.query.filter_by(
             user_id=user_id, place_id=place_id
@@ -144,6 +177,9 @@ def create_review(place_id):
 
         # Update user recommendation cache
         update_user_preference_cache(user_id)
+        
+        operation_time = time.time() - start_time
+        logger.debug(f"REVIEW CREATED: Place {place_id}, User {user_id} in {operation_time:.3f}s")
 
         return jsonify({
             'id': str(review.id),
@@ -207,13 +243,14 @@ def get_place_reviews(place_id):
     if not check_place_exists(place_id):
         return jsonify({'error': 'Place not found'}), 404
 
-    # Include sorting parameters in cache key
-    cache_key = f'reviews:{place_id}:page={page}:size={size}:sort={sort_by}:order={order}'
-    cached_reviews = get_cached_reviews(cache_key)
-    if cached_reviews is not None:
-        return jsonify(cached_reviews), 200
+    # Create URL-based cache key with all parameters
+    cache_key = get_reviews_cache_key(place_id, page=page, size=size, sort_by=sort_by, order=order)
+    cached_data = get_cached_reviews(cache_key)
+    if cached_data is not None:
+        return jsonify(cached_data), 200
 
     try:
+        start_time = time.time()
         # Get total count for pagination
         total_count = db.session.query(UserReview).filter(
             UserReview.place_id == place_id
@@ -265,8 +302,11 @@ def get_place_reviews(place_id):
             total_count=total_count
         )
 
-        # Cache the paginated response
+        # Cache the paginated response - store for 1 hour
         cache_reviews(cache_key, response)
+        
+        query_time = time.time() - start_time
+        logger.debug(f"DB QUERY: Reviews for place {place_id} took {query_time:.3f}s")
         
         return jsonify(response), 200
 
@@ -308,6 +348,7 @@ def update_review(place_id):
         return jsonify({'error': 'Place not found'}), 404
 
     try:
+        start_time = time.time()
         review = UserReview.query.options(joinedload(UserReview.user)).filter_by(
             user_id=user_id, place_id=place_id
         ).first()
@@ -339,6 +380,9 @@ def update_review(place_id):
 
         # Update user recommendation cache
         update_user_preference_cache(user_id)
+        
+        operation_time = time.time() - start_time
+        logger.debug(f"REVIEW UPDATED: Place {place_id}, User {user_id} in {operation_time:.3f}s")
 
         return jsonify({
             'id': str(review.id),
@@ -369,6 +413,7 @@ def delete_review(place_id):
         return jsonify({'error': 'Place not found'}), 404
 
     try:
+        start_time = time.time()
         review = UserReview.query.filter_by(
             user_id=user_id, place_id=place_id
         ).first()
@@ -391,10 +436,193 @@ def delete_review(place_id):
 
         # Update user recommendation cache
         update_user_preference_cache(user_id)
+        
+        operation_time = time.time() - start_time
+        logger.debug(f"REVIEW DELETED: Place {place_id}, User {user_id} in {operation_time:.3f}s")
 
         return jsonify({'message': 'Review deleted successfully'}), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f'Error deleting review: {str(e)}')
-        return jsonify({'error': 'Failed to delete review'}), 500 
+        return jsonify({'error': 'Failed to delete review'}), 500
+
+
+
+
+#testing
+@blueprint.get('/all')
+def get_all_reviews():
+    """Get all reviews in the database for testing purposes."""
+    # Get pagination parameters
+    page = request.args.get('page', default=1, type=int)
+    size = request.args.get('size', default=20, type=int)
+    
+    # Get sorting parameters
+    sort_by = request.args.get('sort_by', default='created_at', type=str)
+    order = request.args.get('order', default='desc', type=str)
+    
+    # Validate pagination parameters
+    if page < 1:
+        return jsonify({'error': 'Page must be greater than 0'}), 400
+    if size < 1 or size > 100:
+        return jsonify({'error': 'Size must be between 1 and 100'}), 400
+    
+    # Validate sorting parameters
+    valid_sort_fields = ['rating', 'updated_at', 'created_at', 'place_id']
+    valid_orders = ['asc', 'desc']
+    
+    if sort_by not in valid_sort_fields:
+        return jsonify({'error': f'Invalid sort_by. Must be one of: {", ".join(valid_sort_fields)}'}), 400
+    
+    if order not in valid_orders:
+        return jsonify({'error': f'Invalid order. Must be one of: {", ".join(valid_orders)}'}), 400
+
+    offset = (page - 1) * size
+
+    try:
+        # Get total count for pagination
+        total_count = db.session.query(UserReview).count()
+
+        # Build the query with sorting
+        query = db.session.query(UserReview, User).join(
+            User, UserReview.user_id == User.id
+        )
+        
+        # Apply sorting
+        if sort_by == 'rating':
+            sort_column = UserReview.rating
+        elif sort_by == 'updated_at':
+            sort_column = UserReview.updated_at
+        elif sort_by == 'place_id':
+            sort_column = UserReview.place_id
+        else:  # created_at (default)
+            sort_column = UserReview.created_at
+        
+        if order == 'asc':
+            query = query.order_by(sort_column.asc())
+        else:  # desc (default)
+            query = query.order_by(sort_column.desc())
+        
+        # Apply pagination
+        reviews = query.offset(offset).limit(size).all()
+        
+        reviews_data = [{
+            'id': str(review.id),
+            'user': {
+                'user_id': str(user.id),
+                'full_name': user.full_name,
+                'avatar': user.avatar,
+                'email': user.email
+            },
+            'place_id': review.place_id,
+            'rating': review.rating,
+            'review': review.review,
+            'created_at': review.created_at.isoformat(),
+            'updated_at': review.updated_at.isoformat()
+        } for review, user in reviews]
+
+        # Create paginated response
+        response = create_paging(
+            data=reviews_data,
+            page=page,
+            size=size,
+            offset=offset,
+            total_count=total_count
+        )
+
+        return jsonify(response), 200
+
+    except SQLAlchemyError as e:
+        logger.error(f'Error fetching all reviews: {str(e)}')
+        return jsonify({'error': 'Failed to fetch reviews'}), 500
+
+
+@blueprint.get('/user/<uuid:user_id>/place/<string:place_id>')
+def get_user_place_review(user_id, place_id):
+    """Get a specific user's review for a specific place."""
+    try:
+        # Check if place exists in Neo4j
+        if not check_place_exists(place_id):
+            return jsonify({'error': 'Place not found'}), 404
+            
+        # Get the review with user information
+        review_query = db.session.query(UserReview, User).join(
+            User, UserReview.user_id == User.id
+        ).filter(
+            UserReview.user_id == user_id,
+            UserReview.place_id == place_id
+        ).first()
+        
+        if not review_query:
+            return jsonify({'error': 'Review not found'}), 404
+            
+        review, user = review_query
+        
+        # Format the response
+        review_data = {
+            'id': str(review.id),
+            'user': {
+                'user_id': str(user.id),
+                'full_name': user.full_name,
+                'avatar': user.avatar
+            },
+            'place_id': review.place_id,
+            'rating': review.rating,
+            'review': review.review,
+            'created_at': review.created_at.isoformat(),
+            'updated_at': review.updated_at.isoformat()
+        }
+        
+        return jsonify(review_data), 200
+        
+    except SQLAlchemyError as e:
+        logger.error(f'Error fetching user review: {str(e)}')
+        return jsonify({'error': 'Failed to fetch review'}), 500
+
+
+@blueprint.get('/my-review/<string:place_id>')
+@jwt_required(optional=True)
+def get_my_place_review(place_id):
+    """Get the current user's review for a specific place."""
+    try:
+        # Get user ID from JWT token
+        user_id = get_jwt_identity()
+        
+        # Check if place exists in Neo4j
+        if not check_place_exists(place_id):
+            return jsonify({'error': 'Place not found'}), 404
+            
+        # Get the review with user information
+        review_query = db.session.query(UserReview, User).join(
+            User, UserReview.user_id == User.id
+        ).filter(
+            UserReview.user_id == user_id,
+            UserReview.place_id == place_id
+        ).first()
+        
+        if not review_query:
+            return jsonify({'error': 'You have not reviewed this place yet'}), 404
+            
+        review, user = review_query
+        
+        # Format the response
+        review_data = {
+            'id': str(review.id),
+            'user': {
+                'user_id': str(user.id),
+                'full_name': user.full_name,
+                'avatar': user.avatar
+            },
+            'place_id': review.place_id,
+            'rating': review.rating,
+            'review': review.review,
+            'created_at': review.created_at.isoformat(),
+            'updated_at': review.updated_at.isoformat()
+        }
+        
+        return jsonify(review_data), 200
+        
+    except SQLAlchemyError as e:
+        logger.error(f'Error fetching user review: {str(e)}')
+        return jsonify({'error': 'Failed to fetch review'}), 500 
