@@ -202,6 +202,7 @@ def get_things_to_do():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
+    search = request.args.get('search', default='', type=str)
     offset = (page - 1) * size
     sort_order = request.args.get('order', default='desc', type=str)
     sort_order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
@@ -214,7 +215,7 @@ def get_things_to_do():
 
     # Check if the result is cached
     redis = get_redis()
-    cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}'
+    cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}:search={search}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
@@ -240,30 +241,40 @@ def get_things_to_do():
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the total count of things to do
-    total_count_result = execute_neo4j_query(
-        """
-        MATCH (t:ThingToDo)
-        RETURN count(t) AS total_count
-        """
-    )
+    # Create Cypher query parameters
+    query_params = {'offset': offset, 'size': size}
+    
+    # Base query with name search filter if provided
+    name_filter = ""
+    if search:
+        name_filter = "WHERE toLower(t.name) CONTAINS toLower($search) "
+        query_params['search'] = search
+
+    # Get the total count of things to do matching the search criteria
+    count_query = f"""
+    MATCH (t:ThingToDo)
+    {name_filter}
+    RETURN count(t) AS total_count
+    """
+    
+    total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
     # Get the things to do with pagination, including city
-    result = execute_neo4j_query(
-        f"""
-        MATCH (t:ThingToDo)-[:LOCATED_IN]->(c:City)
-        OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
-        OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
-        OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
-        WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories, c
-        RETURN t, elementId(t) AS element_id, subtypes, subcategories, c AS city
-        ORDER BY t.raw_ranking {sort_order}
-        SKIP $offset
-        LIMIT $size
-        """,
-        {'offset': offset, 'size': size},
-    )
+    things_query = f"""
+    MATCH (t:ThingToDo)
+    {name_filter}
+    OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
+    OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
+    OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
+    WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories, c
+    RETURN t, elementId(t) AS element_id, subtypes, subcategories, c AS city
+    ORDER BY t.raw_ranking {sort_order}
+    SKIP $offset
+    LIMIT $size
+    """
+    
+    result = execute_neo4j_query(things_query, query_params)
 
     # Process each thing to do record
     processed_results = []
