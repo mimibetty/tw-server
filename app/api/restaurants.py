@@ -7,7 +7,7 @@ from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import create_paging, execute_neo4j_query, get_redis
+from app.utils import create_paging, execute_neo4j_query, get_redis, delete_place_and_related_data
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('restaurants', __name__, url_prefix='/restaurants')
@@ -499,3 +499,67 @@ def get_restaurant(restaurant_id):
         logger.warning('Redis is not available to set data: %s', e)
 
     return schema.dump(restaurant), 200
+
+
+@blueprint.delete('/<restaurant_id>/')
+def delete_restaurant(restaurant_id):
+    """
+    Delete a restaurant and all related data.
+    
+    This endpoint will:
+    - Remove the restaurant from Neo4j database
+    - Delete all user reviews of this restaurant
+    - Remove restaurant from user favorites
+    - Remove restaurant from user trips
+    - Clear all related cache entries
+    """
+    try:
+        # First check if restaurant exists and is actually a restaurant
+        result = execute_neo4j_query(
+            """
+            MATCH (r:Restaurant)
+            WHERE elementId(r) = $restaurant_id
+            RETURN r.name as name, r.type as type
+            """,
+            {'restaurant_id': restaurant_id}
+        )
+        
+        if not result:
+            return {'error': 'Restaurant not found'}, 404
+        
+        restaurant_name = result[0]['name']
+        
+        # Use the comprehensive deletion utility
+        deletion_summary = delete_place_and_related_data(restaurant_id)
+        
+        # Check if deletion was successful
+        if not deletion_summary['place_deleted']:
+            return {
+                'error': 'Failed to delete restaurant',
+                'details': deletion_summary['errors']
+            }, 500
+        
+        # Prepare success response
+        response = {
+            'message': f'Restaurant "{restaurant_name}" has been successfully deleted',
+            'summary': {
+                'restaurant_deleted': deletion_summary['place_deleted'],
+                'reviews_deleted': deletion_summary['reviews_deleted'],
+                'favorites_removed': deletion_summary['favorites_deleted'],
+                'trips_updated': deletion_summary['trips_updated'],
+                'cache_cleared': deletion_summary['cache_cleared']
+            }
+        }
+        
+        # Include any non-critical errors as warnings
+        if deletion_summary['errors']:
+            response['warnings'] = deletion_summary['errors']
+        
+        return response, 200
+        
+    except Exception as e:
+        logger.error(f"Error deleting restaurant {restaurant_id}: {str(e)}")
+        return {
+            'error': 'An unexpected error occurred while deleting the restaurant',
+            'details': str(e)
+        }, 500

@@ -174,7 +174,7 @@ def add_place_to_trip(trip_id):
 
     if not data or 'place_id' not in data:
         return jsonify({'error': 'Place ID is required'}), 400
-
+    
     try:
         # Verify trip exists and belongs to user
         user_trip = UserTrip.query.filter_by(
@@ -583,10 +583,18 @@ def reorder_trip_places(trip_id):
         # Set is_optimized to false since we're reordering places
         user_trip.is_optimized = False
 
-        # Create a mapping of place_id to new order
-        place_order_map = {
-            place: i + 1 for i, place in enumerate(data['places'])
-        }
+        # Extract place_ids from the objects and create a mapping of place_id to new order
+        place_order_map = {}
+        for i, place_obj in enumerate(data['places']):
+            # Handle both formats: objects with place_id property or simple strings
+            if isinstance(place_obj, dict) and 'place_id' in place_obj:
+                place_id = place_obj['place_id']
+            elif isinstance(place_obj, str):
+                place_id = place_obj
+            else:
+                return jsonify({'error': f'Invalid place format at index {i}. Expected object with place_id or string.'}), 400
+            
+            place_order_map[place_id] = i + 1
 
         # Update orders
         for place_id, new_order in place_order_map.items():
@@ -639,8 +647,8 @@ def get_place_details_from_neo4j(place_id):
     # Extract the place data and determine its type
     place_data = result[0]['p']
     place_data['element_id'] = result[0]['element_id']
-    place_types = result['types']
-    city_data = result['c']
+    place_types = result[0]['types']
+    city_data = result[0]['c']
 
     # Add city data if available (without created_at)
     if city_data:

@@ -232,3 +232,160 @@ def update_user_preference_cache(user_id: str):
     except Exception as e:
         logger.error(f"Error updating user preference cache: {str(e)}")
         return False
+
+
+def delete_place_and_related_data(place_id: str) -> dict:
+    """
+    Comprehensively delete a place and all related data from both Neo4j and PostgreSQL.
+    
+    This function handles:
+    - Deleting the place from Neo4j (hotels, restaurants, things-to-do)
+    - Removing all relationships (features, price levels, cuisines, etc.)
+    - Deleting user reviews from PostgreSQL
+    - Removing user favorites from PostgreSQL
+    - Removing place from trips in PostgreSQL
+    - Clearing all related cache entries
+    
+    Args:
+        place_id: The ID of the place to delete
+        
+    Returns:
+        dict: Summary of deletion operations with counts and status
+    """
+    from app.models import UserFavourite, UserReview, UserTrip, db
+    
+    deletion_summary = {
+        'place_deleted': False,
+        'reviews_deleted': 0,
+        'favorites_deleted': 0,
+        'trips_updated': 0,
+        'cache_cleared': False,
+        'errors': []
+    }
+    
+    try:
+        # Check if place exists first
+        if not check_place_exists(place_id):
+            deletion_summary['errors'].append(f"Place with ID {place_id} not found")
+            return deletion_summary
+        
+        # 1. Delete user reviews from PostgreSQL
+        try:
+            reviews_deleted = db.session.query(UserReview).filter_by(place_id=place_id).delete()
+            deletion_summary['reviews_deleted'] = reviews_deleted
+            logger.info(f"Deleted {reviews_deleted} reviews for place {place_id}")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error deleting reviews: {str(e)}")
+        
+        # 2. Delete user favorites from PostgreSQL
+        try:
+            favorites_deleted = db.session.query(UserFavourite).filter_by(place_id=place_id).delete()
+            deletion_summary['favorites_deleted'] = favorites_deleted
+            logger.info(f"Deleted {favorites_deleted} favorites for place {place_id}")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error deleting favorites: {str(e)}")
+        
+        # 3. Remove place from trips in PostgreSQL
+        try:
+            # Get all trips that contain this place using the correct Trip model
+            from app.models import Trip
+            trips_deleted = db.session.query(Trip).filter_by(place_id=place_id).delete()
+            deletion_summary['trips_updated'] = trips_deleted
+            logger.info(f"Deleted {trips_deleted} trip entries for place {place_id}")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error deleting trip entries: {str(e)}")
+        
+        # Commit PostgreSQL changes
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            deletion_summary['errors'].append(f"Error committing database changes: {str(e)}")
+        
+        # 4. Delete place and all relationships from Neo4j
+        # IMPORTANT: This only deletes the place node and its relationships.
+        # It does NOT delete connected nodes like Subtype, Feature, PriceLevel, etc.
+        # since those nodes can be shared by multiple places.
+        # Example: If a hotel has Feature "WiFi", deleting the hotel will remove
+        # the HAS_FEATURE relationship but keep the "WiFi" Feature node for other places.
+        try:
+            result = execute_neo4j_query(
+                """
+                MATCH (p)
+                WHERE elementId(p) = $place_id
+                OPTIONAL MATCH (p)-[r]-()
+                DELETE r, p
+                RETURN count(p) as deleted_count
+                """,
+                {'place_id': place_id}
+            )
+            
+            if result and result[0]['deleted_count'] > 0:
+                deletion_summary['place_deleted'] = True
+                logger.info(f"Successfully deleted place {place_id} from Neo4j")
+            else:
+                deletion_summary['errors'].append("Failed to delete place from Neo4j")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error deleting place from Neo4j: {str(e)}")
+        
+        # 5. Clear all related cache entries
+        try:
+            redis = get_redis()
+            
+            # Clear cache for all place types
+            cache_patterns = [
+                'hotels:*',
+                'restaurants:*',
+                'things-to-do:*',
+                f'hotels:{place_id}',
+                f'restaurants:{place_id}',
+                f'things-to-do:{place_id}',
+                'reviews:*',
+                'recommendations:*'
+            ]
+            
+            total_keys_deleted = 0
+            for pattern in cache_patterns:
+                keys_to_delete = redis.keys(pattern)
+                if keys_to_delete:
+                    redis.delete(*keys_to_delete)
+                    total_keys_deleted += len(keys_to_delete)
+            
+            deletion_summary['cache_cleared'] = True
+            logger.info(f"Cleared {total_keys_deleted} cache entries related to place {place_id}")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error clearing cache: {str(e)}")
+        
+        # Update user preference caches for affected users
+        try:
+            # Get all users who had this place in favorites or reviews
+            affected_users = set()
+            
+            # Users who favorited this place
+            favorite_users = db.session.execute(
+                db.text("SELECT DISTINCT user_id FROM user_favourites WHERE place_id = :place_id"),
+                {'place_id': place_id}
+            ).fetchall()
+            affected_users.update([str(user.user_id) for user in favorite_users])
+            
+            # Users who reviewed this place
+            review_users = db.session.execute(
+                db.text("SELECT DISTINCT user_id FROM user_reviews WHERE place_id = :place_id"),
+                {'place_id': place_id}
+            ).fetchall()
+            affected_users.update([str(user.user_id) for user in review_users])
+            
+            # Update preference cache for each affected user
+            for user_id in affected_users:
+                update_user_preference_cache(user_id)
+            
+            logger.info(f"Updated preference cache for {len(affected_users)} affected users")
+        except Exception as e:
+            deletion_summary['errors'].append(f"Error updating user preference caches: {str(e)}")
+        
+        return deletion_summary
+        
+    except Exception as e:
+        deletion_summary['errors'].append(f"Unexpected error during deletion: {str(e)}")
+        logger.error(f"Error in delete_place_and_related_data: {str(e)}")
+        return deletion_summary
