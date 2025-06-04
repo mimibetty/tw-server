@@ -7,7 +7,7 @@ from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import create_paging, execute_neo4j_query, get_redis
+from app.utils import create_paging, execute_neo4j_query, get_redis, delete_place_and_related_data
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
@@ -426,5 +426,69 @@ def get_thing_to_do(thing_to_do_id):
         logger.warning('Redis is not available to set data: %s', e)
 
     return schema.dump(thing_to_do), 200
+
+
+@blueprint.delete('/<thing_to_do_id>/')
+def delete_thing_to_do(thing_to_do_id):
+    """
+    Delete a thing-to-do and all related data.
+    
+    This endpoint will:
+    - Remove the thing-to-do from Neo4j database
+    - Delete all user reviews of this thing-to-do
+    - Remove thing-to-do from user favorites
+    - Remove thing-to-do from user trips
+    - Clear all related cache entries
+    """
+    try:
+        # First check if thing-to-do exists and is actually a thing-to-do
+        result = execute_neo4j_query(
+            """
+            MATCH (t:ThingToDo)
+            WHERE elementId(t) = $thing_to_do_id
+            RETURN t.name as name, t.type as type
+            """,
+            {'thing_to_do_id': thing_to_do_id}
+        )
+        
+        if not result:
+            return {'error': 'Thing to do not found'}, 404
+        
+        thing_name = result[0]['name']
+        
+        # Use the comprehensive deletion utility
+        deletion_summary = delete_place_and_related_data(thing_to_do_id)
+        
+        # Check if deletion was successful
+        if not deletion_summary['place_deleted']:
+            return {
+                'error': 'Failed to delete thing to do',
+                'details': deletion_summary['errors']
+            }, 500
+        
+        # Prepare success response
+        response = {
+            'message': f'Thing to do "{thing_name}" has been successfully deleted',
+            'summary': {
+                'thing_to_do_deleted': deletion_summary['place_deleted'],
+                'reviews_deleted': deletion_summary['reviews_deleted'],
+                'favorites_removed': deletion_summary['favorites_deleted'],
+                'trips_updated': deletion_summary['trips_updated'],
+                'cache_cleared': deletion_summary['cache_cleared']
+            }
+        }
+        
+        # Include any non-critical errors as warnings
+        if deletion_summary['errors']:
+            response['warnings'] = deletion_summary['errors']
+        
+        return response, 200
+        
+    except Exception as e:
+        logger.error(f"Error deleting thing to do {thing_to_do_id}: {str(e)}")
+        return {
+            'error': 'An unexpected error occurred while deleting the thing to do',
+            'details': str(e)
+        }, 500
 
 
