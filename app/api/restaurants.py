@@ -276,6 +276,7 @@ def get_restaurants():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
+    search = request.args.get('search', default='', type=str)
     offset = (page - 1) * size
 
     user_id = None
@@ -286,7 +287,7 @@ def get_restaurants():
 
     # Check if the result is cached
     redis = get_redis()
-    cache_key = f'restaurants:page={page}:size={size}'
+    cache_key = f'restaurants:page={page}:size={size}:search={search}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
@@ -313,28 +314,38 @@ def get_restaurants():
         logger.exception(e)
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the total count of restaurants
-    total_count_result = execute_neo4j_query(
-        """
-        MATCH (r:Restaurant)
-        RETURN count(r) AS total_count
-        """
-    )
+    # Create Cypher query parameters
+    query_params = {'offset': offset, 'size': size}
+    
+    # Base query with name search filter if provided
+    name_filter = ""
+    if search:
+        name_filter = "WHERE toLower(r.name) CONTAINS toLower($search) "
+        query_params['search'] = search
+
+    # Get the total count of restaurants matching the search criteria
+    count_query = f"""
+    MATCH (r:Restaurant)
+    {name_filter}
+    RETURN count(r) AS total_count
+    """
+    
+    total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
     # Get the restaurants with pagination, their price_levels, and city
-    result = execute_neo4j_query(
-        """
-        MATCH (r:Restaurant)
-        OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-        OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
-        RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
-        ORDER BY r.raw_ranking DESC
-        SKIP $offset
-        LIMIT $size
-        """,
-        {'offset': offset, 'size': size},
-    )
+    restaurants_query = f"""
+    MATCH (r:Restaurant)
+    {name_filter}
+    OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+    OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
+    RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+    ORDER BY r.raw_ranking DESC
+    SKIP $offset
+    LIMIT $size
+    """
+    
+    result = execute_neo4j_query(restaurants_query, query_params)
 
     # Add element_id, price_levels, and city to each restaurant record
     for record in result:

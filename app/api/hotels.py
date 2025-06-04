@@ -254,6 +254,7 @@ def get_hotels():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
+    search = request.args.get('search', default='', type=str)
     offset = (page - 1) * size
 
     user_id = None
@@ -264,7 +265,7 @@ def get_hotels():
 
     # Check if the result is cached
     redis = get_redis()
-    cache_key = f'hotels:page={page}:size={size}'
+    cache_key = f'hotels:page={page}:size={size}:search={search}'
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
@@ -290,28 +291,38 @@ def get_hotels():
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Get the total count of hotels
-    total_count_result = execute_neo4j_query(
-        """
-        MATCH (h:Hotel)
-        RETURN count(h) AS total_count
-        """
-    )
+    # Create Cypher query parameters
+    query_params = {'offset': offset, 'size': size}
+    
+    # Base query with name search filter if provided
+    name_filter = ""
+    if search:
+        name_filter = "WHERE toLower(h.name) CONTAINS toLower($search) "
+        query_params['search'] = search
+
+    # Get the total count of hotels matching the search criteria
+    count_query = f"""
+    MATCH (h:Hotel)
+    {name_filter}
+    RETURN count(h) AS total_count
+    """
+    
+    total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
     # Get the hotels with pagination, their price_levels, and city
-    result = execute_neo4j_query(
-        """
-        MATCH (h:Hotel)
-        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
-        ORDER BY h.raw_ranking DESC
-        SKIP $offset
-        LIMIT $size
-        """,
-        {'offset': offset, 'size': size},
-    )
+    hotels_query = f"""
+    MATCH (h:Hotel)
+    {name_filter}
+    OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+    OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
+    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+    ORDER BY h.raw_ranking DESC
+    SKIP $offset
+    LIMIT $size
+    """
+    
+    result = execute_neo4j_query(hotels_query, query_params)
 
     # Add element_id, price_levels, and city to each hotel record
     for record in result:
