@@ -216,16 +216,29 @@ def add_place_to_trip(trip_id):
         db.session.add(trip_place)
         db.session.commit()
 
-        return jsonify(
-            {
-                'id': str(trip_place.id),
-                'tripId': str(trip_place.trip_id),
-                'placeId': trip_place.place_id,
-                'order': trip_place.order,
-                'createdAt': trip_place.created_at.isoformat(),
-                'updatedAt': trip_place.updated_at.isoformat(),
-            }
-        ), 201
+        # Get detailed place information from Neo4j
+        place_details = get_place_details_from_neo4j(data['place_id'])
+        
+        if place_details:
+            # Add trip-specific information to the place details
+            place_details['order'] = trip_place.order
+            place_details['createdAt'] = trip_place.created_at.isoformat()
+            place_details['updatedAt'] = trip_place.updated_at.isoformat()
+            
+            # Return the enriched place details
+            return jsonify(place_details), 201
+        else:
+            # Fallback to basic trip place information if place details not found
+            return jsonify(
+                {
+                    'id': str(trip_place.id),
+                    'tripId': str(trip_place.trip_id),
+                    'placeId': trip_place.place_id,
+                    'order': trip_place.order,
+                    'createdAt': trip_place.created_at.isoformat(),
+                    'updatedAt': trip_place.updated_at.isoformat(),
+                }
+            ), 201
 
     except SQLAlchemyError as e:
         db.session.rollback()
