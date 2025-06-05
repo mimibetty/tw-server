@@ -1,5 +1,7 @@
 import logging
 import math
+import time
+import json
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -10,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.extensions import ma
 from app.models import Trip, UserTrip, db
 from app.utils import execute_neo4j_query
+from app.utils import get_redis
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('trips', __name__, url_prefix='/trips')
@@ -92,63 +95,59 @@ def create_user_trip():
 @jwt_required()
 def get_user_trips():
     """Get all user trips for the authenticated user."""
+    start_time = time.time()
     user_id = get_jwt_identity()
     
     # Get search parameters
     search_name = request.args.get('name', '').strip()
-    status = request.args.get('status')
-    if status is not None:
+    status_param = request.args.get('status')
+    status = None
+    if status_param is not None:
         try:
-            status = bool(int(status))  # Convert '0' to False, '1' to True
+            status = bool(int(status_param))  # Convert '0' to False, '1' to True
         except (ValueError, TypeError):
+            logger.warning(f"Invalid status parameter: {status_param}")
             return jsonify({'error': 'Status must be 0 (Upcoming) or 1 (Done)'}), 400
     
     try:
         # Build query with filters
         query = UserTrip.query.filter_by(user_id=user_id)
         
-        # Apply name search if provided
         if search_name:
             query = query.filter(UserTrip.name.ilike(f'%{search_name}%'))
             
-        # Apply status filter if provided
         if status is not None:
             query = query.filter(UserTrip.trip_status == status)
             
-        # Order by creation date
         user_trips = query.order_by(UserTrip.created_at.desc()).all()
 
         result = []
+
         for trip in user_trips:
-            # Get all place_ids for this trip
-            trip_places = Trip.query.filter_by(trip_id=trip.id).all()
+            trip_places = Trip.query.filter_by(trip_id=trip.id).all() # This is another DB query
             place_ids = [tp.place_id for tp in trip_places]
             number_hotel = number_restaurant = number_thingtodo = 0
+            
             if place_ids:
-                # Batch query Neo4j for all place_ids in this trip
-                neo4j_results = execute_neo4j_query(
-                    """
-                    MATCH (p)
-                    WHERE elementId(p) IN $place_ids
-                    RETURN elementId(p) AS element_id, labels(p) AS types
-                    """,
-                    {'place_ids': place_ids},
-                )
-                for res in neo4j_results:
-                    types = res.get('types', [])
-                    if 'Hotel' in types:
-                        number_hotel += 1
-                    elif 'Restaurant' in types:
-                        number_restaurant += 1
-                    elif 'ThingToDo' in types:
-                        number_thingtodo += 1
+                # Use cached function instead of direct Neo4j query
+                for place_id in place_ids:
+                    place_info = get_place_details_from_neo4j(place_id)
+                    if place_info and 'type' in place_info:
+                        place_type = place_info['type']
+                        if place_type == 'HOTEL':
+                            number_hotel += 1
+                        elif place_type == 'RESTAURANT':
+                            number_restaurant += 1
+                        elif place_type == 'THING-TO-DO':
+                            number_thingtodo += 1
+            
             result.append(
                 {
                     'id': str(trip.id),
                     'name': trip.name,
                     'created_at': trip.created_at.isoformat(),
                     'updated_at': trip.updated_at.isoformat(),
-                    'place_count': len(trip.trips),
+                    'place_count': len(trip.trips), # This is len(trip_places)
                     'is_optimized': trip.is_optimized,
                     'status': trip.trip_status,
                     'status_text': "Done" if trip.trip_status else "Upcoming",
@@ -157,11 +156,16 @@ def get_user_trips():
                     'numberThingtodo': number_thingtodo,
                 }
             )
-
+        
+        execution_time = time.time() - start_time
+        logger.info(f"get_user_trips executed in {execution_time:.4f}s for user {user_id} - returned {len(result)} trips")
+        print(f"get_user_trips executed in {execution_time:.4f}s for user {user_id} - returned {len(result)} trips")
         return jsonify(result), 200
 
     except SQLAlchemyError as e:
-        logger.error(f'Error fetching user trips: {str(e)}')
+        db.session.rollback()
+        execution_time = time.time() - start_time
+        logger.error(f"get_user_trips failed in {execution_time:.4f}s for user {user_id}: {str(e)}")
         return jsonify({'error': 'Failed to fetch user trips'}), 500
 
 
@@ -359,115 +363,11 @@ def get_trip_places(trip_id):
                 }
             ), 200
 
-        # Batch fetch place details from Neo4j
-        place_ids = [place.place_id for place in places]
-        place_details_map = {}
-
-        # Execute a single Neo4j query to get all places
-        results = execute_neo4j_query(
-            """
-            MATCH (p)
-            WHERE elementId(p) IN $place_ids
-            OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-            RETURN p, elementId(p) AS element_id, labels(p) AS types, c
-            """,
-            {'place_ids': place_ids},
-        )
-        # Process results and create a map of place_id to place details
-        for result in results:
-            place_data = result['p']
-            place_id = result['element_id']
-            place_types = result['types']
-            city_data = result['c']
-
-            # Add city data if available
-            if city_data:
-                place_data['city'] = {
-                    'postal_code': city_data.get('postal_code', ''),
-                    'name': city_data.get('name', ''),
-                }
-
-            # Determine place type and standardize it
-            place_type = None
-            standardized_type = 'UNKNOWN'
-            for type_label in place_types:
-                if type_label == 'Hotel':
-                    place_type = type_label
-                    standardized_type = 'HOTEL'
-                    break
-                elif type_label == 'Restaurant':
-                    place_type = type_label
-                    standardized_type = 'RESTAURANT'
-                    break
-                elif type_label == 'ThingToDo':
-                    place_type = type_label
-                    standardized_type = 'THING-TO-DO'
-                    break
-
-            if not place_type:
-                place_type = place_data.get('type', 'Unknown')
-
-            place_data['type'] = standardized_type
-            place_data['element_id'] = place_id
-
-            # Set default values for missing fields
-            if (
-                'rating_histogram' not in place_data
-                or not place_data['rating_histogram']
-            ):
-                place_data['rating_histogram'] = [0, 0, 0, 0, 0]
-
-            if 'rating' not in place_data or place_data['rating'] is None:
-                rh = place_data.get('rating_histogram', [])
-                if rh and isinstance(rh, list) and len(rh) == 5:
-                    total = sum(rh)
-                    if total > 0:
-                        rating = sum((i + 1) * rh[i] for i in range(5)) / total
-                        place_data['rating'] = round(rating, 1)
-                    else:
-                        place_data['rating'] = 0
-                else:
-                    place_data['rating'] = 0
-
-            # Convert camelCase keys to snake_case
-            camel_to_snake_mappings = {
-                'ratingHistogram': 'rating_histogram',
-                'rawRanking': 'raw_ranking',
-                'elementId': 'element_id',
-                'createdAt': 'created_at',
-                'updatedAt': 'updated_at',
-            }
-
-            for camel, snake in camel_to_snake_mappings.items():
-                if camel in place_data and snake not in place_data:
-                    place_data[snake] = place_data[camel]
-
-            # Filter fields to only include those from short schemas
-            common_fields = [
-                'element_id',
-                'city',
-                'email',
-                'image',
-                'latitude',
-                'longitude',
-                'name',
-                'rating',
-                'rating_histogram',
-                'raw_ranking',
-                'street',
-                'type',
-            ]
-
-            filtered_data = {
-                k: place_data.get(k) for k in common_fields if k in place_data
-            }
-            place_details_map[place_id] = filtered_data
-
-        # Combine place details with trip place data
+        # Use cached function instead of batch query
         place_details = []
         number_hotel = number_restaurant = number_thingtodo = 0
         for place in places:
-            place_info = place_details_map.get(place.place_id)
+            place_info = get_place_details_from_neo4j(place.place_id)
             if place_info:
                 place_info['order'] = place.order
                 place_info['createdAt'] = place.created_at.isoformat()
@@ -629,7 +529,24 @@ def reorder_trip_places(trip_id):
 
 
 def get_place_details_from_neo4j(place_id):
-    """Get place details from Neo4j regardless of place type."""
+    """Get place details from Neo4j regardless of place type with caching."""
+    start_time = time.time()
+    
+    # Try to get from cache first
+    cache_key = f"place_details:{place_id}"
+    try:
+        cached_data = get_redis().get(cache_key)
+        if cached_data:
+            print(cached_data)
+            execution_time = time.time() - start_time
+            logger.info(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache hit)")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Failed to get cached place details: {e}")
+    
+    # Cache miss - fetch from Neo4j
+    logger.debug(f"Place details cache miss for place {place_id} - fetching from Neo4j")
+    
     # First, try to find the place by elementId
     result = execute_neo4j_query(
         """
@@ -642,6 +559,8 @@ def get_place_details_from_neo4j(place_id):
     )
 
     if not result:
+        execution_time = time.time() - start_time
+        logger.warning(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (not found)")
         return None
 
     # Extract the place data and determine its type
@@ -738,6 +657,16 @@ def get_place_details_from_neo4j(place_id):
         k: place_data.get(k) for k in common_fields if k in place_data
     }
 
+    # Cache the result for 1 hour (place details don't change frequently)
+    try:
+        get_redis().setex(cache_key, 3600, json.dumps(filtered_data))
+        logger.debug(f"Place details cached for place {place_id}")
+    except Exception as e:
+        logger.warning(f"Failed to cache place details: {e}")
+
+    execution_time = time.time() - start_time
+    logger.info(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache miss)")
+    print(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache miss)")
     return filtered_data
 
 
@@ -811,7 +740,7 @@ def calculate_distance_matrix(places):
     return matrix
 
 
-def solve_tsp(distance_matrix):
+def solve_tsp(distance_matrix, time_limit_seconds = 10):
     """Solve TSP using Google OR-Tools."""
     manager = pywrapcp.RoutingIndexManager(len(distance_matrix), 1, 0)
     routing = pywrapcp.RoutingModel(manager)
@@ -819,6 +748,7 @@ def solve_tsp(distance_matrix):
     def distance_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
+        # print(from_node, to_node, distance_matrix[from_node][to_node])
         return distance_matrix[from_node][to_node]
 
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
@@ -826,13 +756,29 @@ def solve_tsp(distance_matrix):
 
     # Set first solution heuristic
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+
+
+      # 1. Chọn chiến lược tìm giải pháp đầu tiên tốt hơn (ví dụ)
     search_parameters.first_solution_strategy = (
-        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        # routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC # Mặc định của bạn
+        # routing_enums_pb2.FirstSolutionStrategy.CHRISTOFIDES # Thường tốt hơn cho TSP
+        routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC # Để OR-Tools tự chọn
     )
+
+    # # 2. Kích hoạt metaheuristic tìm kiếm cục bộ mạnh mẽ
+    # search_parameters.local_search_metaheuristic = (
+    #     routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    #     # routing_enums_pb2.LocalSearchMetaheuristic.TABU_SEARCH
+    #     # routing_enums_pb2.LocalSearchMetaheuristic.SIMULATED_ANNEALING
+    #     # routing_enums_pb2.LocalSearchMetaheuristic.AUTOMATIC # Để OR-Tools tự chọn
+    # )
+
+    # 3. Đặt giới hạn thời gian cho việc tìm kiếm (ví dụ: 10 giây)
+    search_parameters.time_limit.seconds = time_limit_seconds
 
     # Solve the problem
     solution = routing.SolveWithParameters(search_parameters)
-
+    
     if not solution:
         return None
 
@@ -866,6 +812,7 @@ def calculate_total_distance(route, distance_matrix):
 @jwt_required()
 def optimize_trip(trip_id):
     """Optimize trip route using TSP."""
+    # note to erase calculate distance matrix and solve TSP in production
     user_id = get_jwt_identity()
 
     try:
@@ -873,7 +820,7 @@ def optimize_trip(trip_id):
         user_trip = UserTrip.query.filter_by(
             id=trip_id, user_id=user_id
         ).first()
-
+        
         if not user_trip:
             return jsonify({'error': 'Trip not found'}), 404
 
@@ -901,12 +848,23 @@ def optimize_trip(trip_id):
             return jsonify({'error': 'No valid places found in trip'}), 400
 
         # Calculate distance matrix
+        logger.info(f'Calculating distance matrix for {len(place_details)} places...')
+        matrix_start_time = time.time()
         distance_matrix = calculate_distance_matrix(place_details)
+        matrix_time = time.time() - matrix_start_time
+        logger.info(f'Distance matrix calculation completed in {matrix_time:.3f} seconds')
 
-        # Solve TSP
+        # Solve TSP with timing
+        logger.info(f'Starting TSP optimization for trip {trip_id} with {len(place_details)} places...')
+        tsp_start_time = time.time()
         optimized_route = solve_tsp(distance_matrix)
+        tsp_time = time.time() - tsp_start_time
+        
+        print(f"TSP Route optimization completed in {tsp_time:.3f} seconds for {len(place_details)} places")
+        logger.info(f'TSP optimization completed in {tsp_time:.3f} seconds')
 
         if not optimized_route:
+            logger.error(f'TSP optimization failed after {tsp_time:.3f} seconds')
             return jsonify({'error': 'Failed to optimize route'}), 500
 
         # Calculate total distance
@@ -944,6 +902,10 @@ def optimize_trip(trip_id):
         # Sort places by order to ensure correct sequence
         optimized_places.sort(key=lambda x: x['order'])
 
+        total_optimization_time = matrix_time + tsp_time
+        logger.info(f'Trip {trip_id} optimization completed successfully in {total_optimization_time:.3f} seconds total')
+        print(f"Total optimization time: {total_optimization_time:.3f} seconds (Matrix: {matrix_time:.3f}s, TSP: {tsp_time:.3f}s)")
+
         return jsonify(
             {
                 'message': 'Trip optimized successfully',
@@ -954,6 +916,11 @@ def optimize_trip(trip_id):
                 'totalDistanceKm': round(
                     total_distance / 1000, 2
                 ),  # in kilometers
+                'optimizationTime': {
+                    'total': round(total_optimization_time, 3),
+                    'matrixCalculation': round(matrix_time, 3),
+                    'tspSolving': round(tsp_time, 3)
+                },
                 'places': TripPlaceSchema(many=True).dump(optimized_places),
             }
         ), 200
