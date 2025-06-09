@@ -19,6 +19,7 @@ class RecommendationSchema(ma.Schema):
     created_at = fields.String(dump_only=True)
     element_id = fields.String(dump_only=True)
     description = fields.String(dump_only=True, allow_none=True)
+    email = fields.String(dump_only=True, allow_none=True)
     image = fields.String(dump_only=True)
     is_favorite = fields.Boolean(dump_only=True, default=False)
     latitude = fields.Float(dump_only=True)
@@ -26,6 +27,7 @@ class RecommendationSchema(ma.Schema):
     name = fields.String(dump_only=True)
     phone = fields.String(dump_only=True, allow_none=True)
     photos = fields.List(fields.String(), dump_only=True, default=list)
+    price_levels = fields.List(fields.String(), dump_only=True, default=list)
     rating = fields.Float(dump_only=True, allow_none=True)
     rating_histogram = fields.List(fields.Integer(), dump_only=True, default=list)
     raw_ranking = fields.Float(dump_only=True)
@@ -34,6 +36,7 @@ class RecommendationSchema(ma.Schema):
     subtypes = fields.List(fields.String(), dump_only=True, default=list)
     website = fields.String(dump_only=True, allow_none=True)
     type = fields.String(dump_only=True)
+    city = fields.Dict(dump_only=True, allow_none=True)
     similarity_score = fields.Float(dump_only=True)
     recommendation_reason = fields.String(dump_only=True)
 
@@ -44,7 +47,8 @@ class RecommendationQuerySchema(ma.Schema):
         missing='all',
         validate=lambda x: x in ['all', 'hotels', 'restaurants', 'things-to-do']
     )
-    limit = fields.Integer(required=False, missing=10, validate=lambda x: 1 <= x <= 50)
+    page = fields.Integer(required=False, missing=1, validate=lambda x: x >= 1)
+    size = fields.Integer(required=False, missing=10, validate=lambda x: 1 <= x <= 50)
     exclude_visited = fields.Boolean(required=False, missing=True)
     min_rating = fields.Float(required=False, missing=0.0, validate=lambda x: 0.0 <= x <= 5.0)
     user_lat = fields.Float(required=False, allow_none=True)
@@ -319,7 +323,9 @@ def get_collaborative_recommendations(user_id: str, place_type: str, limit: int)
                elementId(p) AS element_id,
                collect(DISTINCT sc.name) AS subcategories,
                collect(DISTINCT st.name) AS subtypes,
-               c AS city
+               c.name AS city_name,
+               c.created_at AS city_created_at,
+               c.postal_code AS city_postal_code
         LIMIT $limit
         """
 
@@ -337,8 +343,15 @@ def get_collaborative_recommendations(user_id: str, place_type: str, limit: int)
             place['subtypes'] = [st for st in place_data['subtypes'] if st]
             place['similarity_score'] = 0.8  # High score for collaborative filtering
             place['recommendation_reason'] = "Liked by users with similar taste"
-            if place_data.get('city'):
-                place['city'] = place_data['city']
+            
+            # Add city information
+            if place_data.get('city_name'):
+                place['city'] = {
+                    'created_at': place_data.get('city_created_at', ''),
+                    'name': place_data['city_name'],
+                    'postal_code': place_data.get('city_postal_code', '')
+                }
+            
             recommendations.append(place)
 
         return recommendations
@@ -383,14 +396,18 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
              elementId(p) AS element_id,
              collect(DISTINCT sc.name) AS subcategories,
              collect(DISTINCT st.name) AS subtypes,
-             c
+             c.name AS city_name,
+             c.created_at AS city_created_at,
+             c.postal_code AS city_postal_code
         WHERE NOT elementId(p) IN $excluded_places
         AND p.rating IS NOT NULL
         RETURN p AS place, 
                element_id,
                subcategories,
                subtypes,
-               c AS city
+               city_name,
+               city_created_at,
+               city_postal_code
         ORDER BY p.rating DESC, p.raw_ranking DESC
         LIMIT $limit_multiplier
         """
@@ -419,8 +436,13 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
             place['similarity_score'] = similarity_score
             place['recommendation_reason'] = reason
             
-            if place_data.get('city'):
-                place['city'] = place_data['city']
+            # Add city information
+            if place_data.get('city_name'):
+                place['city'] = {
+                    'created_at': place_data.get('city_created_at', ''),
+                    'name': place_data['city_name'],
+                    'postal_code': place_data.get('city_postal_code', '')
+                }
                 
             scored_places.append(place)
 
@@ -458,14 +480,18 @@ def get_popular_recommendations(place_type: str, limit: int, excluded_places: Li
              elementId(p) AS element_id,
              collect(DISTINCT sc.name) AS subcategories,
              collect(DISTINCT st.name) AS subtypes,
-             c
+             c.name AS city_name,
+             c.created_at AS city_created_at,
+             c.postal_code AS city_postal_code
         WHERE NOT elementId(p) IN $excluded_places
         AND p.rating IS NOT NULL
         RETURN p AS place, 
                element_id,
                subcategories,
                subtypes,
-               c AS city
+               city_name,
+               city_created_at,
+               city_postal_code
         ORDER BY p.rating DESC, p.raw_ranking DESC
         LIMIT $limit
         """
@@ -484,8 +510,13 @@ def get_popular_recommendations(place_type: str, limit: int, excluded_places: Li
             place['similarity_score'] = 0.5  # Medium score for popular places
             place['recommendation_reason'] = "Popular in Da Nang"
             
-            if place_data.get('city'):
-                place['city'] = place_data['city']
+            # Add city information
+            if place_data.get('city_name'):
+                place['city'] = {
+                    'created_at': place_data.get('city_created_at', ''),
+                    'name': place_data['city_name'],
+                    'postal_code': place_data.get('city_postal_code', '')
+                }
                 
             recommendations.append(place)
 
@@ -547,10 +578,14 @@ def get_recommendations():
 
         user_id = get_jwt_identity()
         place_type = args['place_type']
-        limit = args['limit']
+        page = args['page']
+        size = args['size']
+        
+        # Calculate offset for pagination
+        offset = (page - 1) * size
 
         # Check cache first
-        cache_key = f"recommendations:{user_id}:{place_type}:{limit}"
+        cache_key = f"recommendations:{user_id}:{place_type}:{size}:{page}"
         try:
             redis = get_redis()
             cached_data = redis.get(cache_key)
@@ -562,28 +597,25 @@ def get_recommendations():
 
         # Get user preferences
         user_prefs = get_user_preferences(user_id)
-        # print("user_prefs")
-        # print(user_prefs)
+        
+        # Get a larger set of recommendations first (for better pagination results)
+        total_recommendations_to_fetch = max(100, size * 5)  # Fetch more for better filtering
         recommendations = []
         
         # If user has enough interaction data, use hybrid approach
         if user_prefs['place_count'] >= 3:
             # Get collaborative filtering recommendations (30%)
-            collab_recs = get_collaborative_recommendations(user_id, place_type, max(2, limit // 3))
+            collab_recs = get_collaborative_recommendations(user_id, place_type, max(10, total_recommendations_to_fetch // 3))
             recommendations.extend(collab_recs)
-            # print("collab_recs")
-            # print(collab_recs)
 
             # Get content-based recommendations (50%)
-            content_limit = max(3, limit - len(collab_recs))
+            content_limit = max(15, total_recommendations_to_fetch - len(collab_recs))
             content_recs = get_content_based_recommendations(user_id, place_type, content_limit, user_prefs)
             recommendations.extend(content_recs)
-            # print("content_recs")
-            # print(content_recs)
 
         # Fill remaining slots with popular places
         current_place_ids = [place['element_id'] for place in recommendations]
-        remaining_limit = limit - len(recommendations)
+        remaining_limit = total_recommendations_to_fetch - len(recommendations)
         
         if remaining_limit > 0:
             popular_recs = get_popular_recommendations(place_type, remaining_limit, current_place_ids)
@@ -607,26 +639,56 @@ def get_recommendations():
         # Apply additional filters
         filtered_recommendations = apply_filters(unique_recommendations, args)
 
-        # Limit final results
-        final_recommendations = filtered_recommendations[:limit]
+        # Calculate total count for pagination
+        total_count = len(filtered_recommendations)
+        page_count = (total_count + size - 1) // size if total_count > 0 else 1
 
-        # print("final_recommendations")
-        # print(final_recommendations)
+        # Apply pagination
+        paginated_recommendations = filtered_recommendations[offset:offset + size]
 
         # Check if places are in user's favorites
-        if final_recommendations:
+        if paginated_recommendations:
             user_favorites = db.session.execute(
                 db.text("SELECT place_id FROM user_favourites WHERE user_id = :user_id"),
                 {'user_id': user_id}
             )
             favorite_place_ids = set(row.place_id for row in user_favorites)
             
-            for place in final_recommendations:
+            for place in paginated_recommendations:
                 place['is_favorite'] = place['element_id'] in favorite_place_ids
 
-        # Serialize and cache results
+        # Format city data properly
+        for place in paginated_recommendations:
+            if place.get('city'):
+                # Ensure city is properly formatted as dict
+                city_data = place['city']
+                if hasattr(city_data, '__dict__'):
+                    # Convert Neo4j Node to dict
+                    place['city'] = {
+                        'created_at': city_data.get('created_at', ''),
+                        'name': city_data.get('name', ''),
+                        'postal_code': city_data.get('postal_code', '')
+                    }
+                elif isinstance(city_data, dict):
+                    # Already a dict, ensure it has required fields
+                    place['city'] = {
+                        'created_at': city_data.get('created_at', ''),
+                        'name': city_data.get('name', ''),
+                        'postal_code': city_data.get('postal_code', '')
+                    }
+
+        # Serialize recommendations
         schema = RecommendationSchema(many=True)
-        result = schema.dump(final_recommendations)
+        serialized_data = schema.dump(paginated_recommendations)
+
+        # Create paging info
+        paging = create_paging(offset, page, page_count, size, total_count)
+
+        # Format final response
+        result = {
+            'data': serialized_data,
+            'paging': paging
+        }
         
         # Cache for 30 minutes
         try:
