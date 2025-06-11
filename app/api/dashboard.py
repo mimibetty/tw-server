@@ -363,9 +363,10 @@ def get_dashboard_summary():
     """Get overall dashboard summary statistics."""
     try:
         # Get total counts
-        total_places_query = """
-        SELECT COUNT(DISTINCT place_id) as total_places
-        FROM trips
+        total_optimized_trips_query = """
+        SELECT COUNT(*) as total_optimized_trips
+        FROM user_trips
+        WHERE is_optimized = true
         """
         
         total_trips_query = """
@@ -387,13 +388,13 @@ def get_dashboard_summary():
         ) as trip_place_counts
         """
 
-        total_places_result = db.session.execute(db.text(total_places_query)).fetchone()
+        total_optimized_result = db.session.execute(db.text(total_optimized_trips_query)).fetchone()
         total_trips_result = db.session.execute(db.text(total_trips_query)).fetchone()
         total_users_result = db.session.execute(db.text(total_users_query)).fetchone()
         avg_places_result = db.session.execute(db.text(avg_places_per_trip_query)).fetchone()
 
         summary = {
-            'total_unique_places_in_trips': total_places_result.total_places if total_places_result else 0,
+            'total_optimized_trips': total_optimized_result.total_optimized_trips if total_optimized_result else 0,
             'total_trips': total_trips_result.total_trips if total_trips_result else 0,
             'total_users': total_users_result.total_users if total_users_result else 0,
             'average_places_per_trip': round(avg_places_result.avg_places_per_trip, 2) if avg_places_result and avg_places_result.avg_places_per_trip else 0

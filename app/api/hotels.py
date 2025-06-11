@@ -319,12 +319,21 @@ def get_hotels():
     # Get search parameter
     search = request.args.get('search', default='', type=str)
     
-    # Get filter parameters - Updated to use min_price and max_price
-    min_price = request.args.get('min_price', type=int)
-    max_price = request.args.get('max_price', type=int)
-    hotel_class = request.args.get('hotel_class', type=float)
+    # Get filter parameters - Updated to use single price parameter
+    price = request.args.get('price', type=int)
+    hotel_class = request.args.get('hotel_class', type=str)  # Changed from float to str
     rating = request.args.get('rating', type=float)
     
+    # Normalize hotel_class format to match database (e.g., "3" -> "3.0", "5" -> "5.0")
+    if hotel_class is not None:
+        try:
+            # Convert to float and back to string to ensure .0 format
+            hotel_class_float = float(hotel_class)
+            hotel_class = f"{hotel_class_float:.1f}"
+        except ValueError:
+            # If conversion fails, keep original value
+            pass
+
     user_id = None
     try:
         user_id = get_jwt_identity()
@@ -333,7 +342,7 @@ def get_hotels():
 
     # Determine operation mode: search vs filter
     is_search_mode = bool(search.strip())
-    is_filter_mode = any([min_price is not None, max_price is not None, hotel_class is not None, rating is not None])
+    is_filter_mode = any([price is not None, hotel_class is not None, rating is not None])
     
     if is_search_mode and is_filter_mode:
         return {'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'}, 400
@@ -344,7 +353,7 @@ def get_hotels():
     elif is_search_mode:
         return _search_hotels(search, page, size, offset, user_id)
     else:
-        return _filter_hotels(min_price, max_price, hotel_class, rating, page, size, offset, user_id)
+        return _filter_hotels(price, hotel_class, rating, page, size, offset, user_id)
 
 
 def _get_all_hotels(page, size, offset, user_id):
@@ -501,14 +510,16 @@ def _search_hotels(search, page, size, offset, user_id):
     return response, 200
 
 
-def _filter_hotels(min_price, max_price, hotel_class, rating, page, size, offset, user_id):
-    """Filter hotels based on criteria."""
+def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
+    """
+    Filter hotels based on criteria using pure database-level filtering.
+    All filters (price, rating, hotel_class) are applied directly in Neo4j for optimal performance.
+    """
+    
     # Build cache key based on filter parameters
     cache_parts = [f'page={page}', f'size={size}', 'filter']
-    if min_price is not None:
-        cache_parts.append(f'min_price={min_price}')
-    if max_price is not None:
-        cache_parts.append(f'max_price={max_price}')
+    if price is not None:
+        cache_parts.append(f'price={price}')
     if hotel_class is not None:
         cache_parts.append(f'hotel_class={hotel_class}')
     if rating is not None:
@@ -516,13 +527,13 @@ def _filter_hotels(min_price, max_price, hotel_class, rating, page, size, offset
     
     cache_key = f'hotels:{":".join(cache_parts)}'
     
-    # Check if the result is cached
+    # Check Redis cache first
     redis = get_redis()
     try:
         cached_response = redis.get(cache_key)
         if cached_response:
             hotels = json.loads(cached_response)
-            # Add is_favorite field if user_id exists
+            # Add is_favorite field for authenticated users
             if user_id:
                 hotel_ids = [hotel['element_id'] for hotel in hotels['data']]
                 favourites = (
@@ -541,71 +552,94 @@ def _filter_hotels(min_price, max_price, hotel_class, rating, page, size, offset
                     hotel['is_favorite'] = False
             return hotels, 200
     except Exception as e:
-        logger.warning('Redis is not available to get data: %s', e)
+        logger.warning('Redis cache unavailable: %s', e)
 
-    # Build filter conditions and parameters
-    filter_conditions = []
+    # Build unified query structure for both count and main queries
     query_params = {'offset': offset, 'size': size}
     
-    # Price range filter - Now using direct min_price and max_price properties from Neo4j
-    if min_price is not None:
-        filter_conditions.append("""
-        (h.min_price IS NOT NULL AND h.min_price >= $min_price) OR
-        (h.min_price IS NULL AND h.max_price IS NOT NULL AND h.max_price >= $min_price)
-        """)
-        query_params['min_price'] = min_price
+    # Determine if we need subquery approach to avoid Neo4j optimization bug
+    # Use subquery if we have any filtering (price, hotel_class, or rating)
+    needs_subquery = price is not None or hotel_class is not None or rating is not None
     
-    if max_price is not None:
-        filter_conditions.append("""
-        (h.max_price IS NOT NULL AND h.max_price <= $max_price) OR
-        (h.max_price IS NULL AND h.min_price IS NOT NULL AND h.min_price <= $max_price)
-        """)
-        query_params['max_price'] = max_price
+    if needs_subquery:
+        # Use subquery approach to avoid Neo4j optimization bug with ORDER BY + filtering
+        
+        # Build initial filter conditions
+        filter_conditions = []
+        if hotel_class is not None:
+            # Start with hotel_class relationship match
+            base_match = """
+            MATCH (h:Hotel)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+            WHERE hc.name = $hotel_class
+            """
+            query_params['hotel_class'] = hotel_class
+        else:
+            base_match = "MATCH (h:Hotel)"
+        
+        # Add other filter conditions
+        additional_filters = []
+        if price is not None:
+            additional_filters.append("h.min_price <= $price AND $price <= h.max_price")
+            query_params['price'] = price
+        
+        if rating is not None:
+            additional_filters.append("h.rating >= $rating")
+            query_params['rating'] = rating
+        
+        # Build WHERE clause for additional filters
+        if additional_filters:
+            if hotel_class is not None:
+                # Already have WHERE clause from hotel_class, use AND
+                additional_where = f"AND {' AND '.join(additional_filters)}"
+            else:
+                # No previous WHERE clause, start with WHERE
+                additional_where = f"WHERE {' AND '.join(additional_filters)}"
+        else:
+            additional_where = ""
+        
+        # Count query using the same structure
+        count_query = f"""
+        {base_match}
+        {additional_where}
+        RETURN count(h) AS total_count
+        """
+        
+        # Main query using subquery pattern to avoid optimization bug
+        hotels_query = f"""
+        {base_match}
+        {additional_where}
+        WITH h
+        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+        ORDER BY h.raw_ranking DESC
+        SKIP $offset
+        LIMIT $size
+        """
+    else:
+        # No filters, use simple approach
+        count_query = """
+        MATCH (h:Hotel)
+        RETURN count(h) AS total_count
+        """
+        
+        hotels_query = """
+        MATCH (h:Hotel)
+        OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+        OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+        ORDER BY h.raw_ranking DESC
+        SKIP $offset
+        LIMIT $size
+        """
     
-    # Hotel class filter
-    if hotel_class is not None:
-        filter_conditions.append("toFloat(h.hotel_class) >= $hotel_class")
-        query_params['hotel_class'] = hotel_class
-    
-    # Rating filter
-    if rating is not None:
-        filter_conditions.append("h.rating >= $rating")
-        query_params['rating'] = rating
-    
-    # Build WHERE clause
-    where_clause = ""
-    if filter_conditions:
-        where_clause = f"WHERE {' AND '.join(filter_conditions)}"
-    
-    # Get the total count of hotels matching the filter criteria
-    count_query = f"""
-    MATCH (h:Hotel)
-    {where_clause}
-    RETURN count(h) AS total_count
-    """
-    
+    # Execute count query
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
-    # Get the hotels with pagination and filters
-    hotels_query = f"""
-    MATCH (h:Hotel)
-    {where_clause}
-    OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
-    OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
-    ORDER BY h.raw_ranking DESC
-    SKIP $offset
-    LIMIT $size
-    """
-    
+    # Execute main query
     result = execute_neo4j_query(hotels_query, query_params)
-
-    # Process results
     hotels_data = _process_hotel_results(result, user_id)
-    
-    # Add min_price and max_price fields (fallback to extraction if not in Neo4j yet)
-    hotels_data = add_price_fields_to_hotels(hotels_data)
 
     # Create paginated response
     response = create_paging(
@@ -615,15 +649,14 @@ def _filter_hotels(min_price, max_price, hotel_class, rating, page, size, offset
         offset=offset,
         total_count=total_count,
     )
-
-    # Cache the response for 6 hours
+    
+    # Cache the result for 6 hours
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
+        logger.warning('Redis cache set failed: %s', e)
+    
     return response, 200
-
 
 def _process_hotel_results(result, user_id):
     """Process hotel query results and add element_id, price_levels, city, and price fields."""
@@ -662,7 +695,7 @@ def _process_hotel_results(result, user_id):
     return hotels_data
 
 
-@blueprint.get('/<hotel_id>/')
+@blueprint.get('/<hotel_id>')
 @jwt_required(optional=True)
 def get_hotel(hotel_id):
     schema = HotelSchema()
