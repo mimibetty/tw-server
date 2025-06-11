@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response
 from flask_jwt_extended import jwt_required
 from marshmallow import fields, ValidationError
 from app.extensions import ma
@@ -413,6 +413,8 @@ def get_monthly_user_statistics():
     """Get statistics about the number of users created each month this year."""
     try:
         from datetime import datetime
+        import json
+        from flask import Response
         
         current_year = datetime.now().year
         
@@ -440,6 +442,12 @@ def get_monthly_user_statistics():
         
         total_result = db.session.execute(db.text(total_users_query))
         
+        # Month names in chronological order
+        months_in_order = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ]
+        
         # Month names mapping
         month_names = {
             1: "January", 2: "February", 3: "March", 4: "April",
@@ -447,17 +455,18 @@ def get_monthly_user_statistics():
             9: "September", 10: "October", 11: "November", 12: "December"
         }
         
-        # Create monthly statistics dictionary
-        monthly_stats = {}
-        
-        # Initialize all months with 0
-        for month_num, month_name in month_names.items():
-            monthly_stats[month_name] = 0
-        
-        # Fill in actual data
+        # Create dictionary with actual data
+        monthly_data = {}
         for row in monthly_result:
             month_name = month_names[int(row.month_number)]
-            monthly_stats[month_name] = row.user_count
+            monthly_data[month_name] = row.user_count
+        
+        # Build response dictionary in correct order
+        monthly_stats = {}
+        
+        # Add months in chronological order
+        for month_name in months_in_order:
+            monthly_stats[month_name] = monthly_data.get(month_name, 0)
         
         # Get total users
         total_users = total_result.fetchone().total_users if total_result else 0
@@ -465,7 +474,9 @@ def get_monthly_user_statistics():
         # Add total to response
         monthly_stats['total_user'] = total_users
         
-        return jsonify(monthly_stats), 200
+        # Return JSON response with preserved order
+        response_json = json.dumps(monthly_stats, separators=(',', ':'))
+        return Response(response_json, content_type='application/json'), 200
 
     except Exception as e:
         logger.error(f"Error getting monthly user statistics: {str(e)}")
