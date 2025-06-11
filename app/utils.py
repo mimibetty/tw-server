@@ -21,6 +21,17 @@ def create_paging(
     }
 
 
+def create_paging_metadata(offset: int, page: int, page_count: int, size: int, total_count: int):
+    """Create only the paging metadata without the data field."""
+    return {
+        'page': page,
+        'size': size,
+        'offset': offset,
+        'totalCount': total_count,
+        'pageCount': page_count,
+    }
+
+
 def execute_neo4j_query(query: str, params: dict = None):
     from neo4j import GraphDatabase
 
