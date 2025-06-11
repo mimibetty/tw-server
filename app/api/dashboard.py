@@ -4,7 +4,7 @@ from flask_jwt_extended import jwt_required
 from marshmallow import fields, ValidationError
 from app.extensions import ma
 from app.models import db
-from app.utils import execute_neo4j_query, create_paging
+from app.utils import execute_neo4j_query, create_paging_metadata
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('dashboard', __name__, url_prefix='/dashboard')
@@ -98,7 +98,7 @@ def get_places_statistics():
             # Return empty result with proper pagination structure
             return jsonify({
                 'data': [],
-                'paging': create_paging(0, page, 1, size, 0)
+                'paging': create_paging_metadata(0, page, 1, size, 0)
             }), 200
 
         # Get place details from Neo4j
@@ -136,7 +136,7 @@ def get_places_statistics():
         if not places_data:
             return jsonify({
                 'data': [],
-                'paging': create_paging(0, page, 1, size, 0)
+                'paging': create_paging_metadata(0, page, 1, size, 0)
             }), 200
 
         # Combine place data with trip statistics
@@ -196,7 +196,7 @@ def get_places_statistics():
         serialized_data = schema.dump(paginated_places)
 
         # Create paging info
-        paging = create_paging(offset, page, page_count, size, total_count)
+        paging = create_paging_metadata(offset, page, page_count, size, total_count)
 
         result = {
             'data': serialized_data,
@@ -278,7 +278,7 @@ def get_places_ranking_statistics():
         if not places_data:
             return jsonify({
                 'data': [],
-                'paging': create_paging(0, page, 1, size, 0)
+                'paging': create_paging_metadata(0, page, 1, size, 0)
             }), 200
 
         # Process place data and calculate review_number
@@ -343,7 +343,7 @@ def get_places_ranking_statistics():
         serialized_data = schema.dump(places_with_reviews)
 
         # Create paging info
-        paging = create_paging(offset, page, page_count, size, total_count)
+        paging = create_paging_metadata(offset, page, page_count, size, total_count)
 
         result = {
             'data': serialized_data,
