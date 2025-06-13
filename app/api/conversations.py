@@ -3,198 +3,202 @@ import logging
 from flask import Blueprint, request
 from google import genai
 from google.genai import types
-from marshmallow import fields
-from sqlalchemy import select
+from marshmallow import fields, validate
 
 from app.environments import FRONTEND_URL, GEMINI_API_KEY
 from app.extensions import ma
-from app.models import VectorItem, db
 from app.utils import execute_neo4j_query
 
 logger = logging.getLogger(__name__)
-blueprint = Blueprint('conversations', __name__, url_prefix='/conversations')
+bp = Blueprint('conversations', __name__, url_prefix='/conversations')
 
-# Configuration
-TEXT_MODEL_ID = 'models/text-embedding-004'
-GEMINI_MODEL_ID = 'gemini-2.0-flash'
+SYSTEM_INSTRUCTION = """You are TripWise, a polite and concise virtual assistant designed to help tourists explore Da Nang. You provide brief and helpful answers to user questions about attractions, activities, and travel information.
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+1. General Tourism Queries
+    - Be polite, clear, and concise in your responses.
+    - Respond to user questions related to Da Nang travel:
+        * Popular attractions, activities, weather, transportation, cultural experiences, etc.
 
+2. Hotel Suggestions
+If a user asks about where to stay or requests hotels:
+    - Call the `get_hotel_list` function. This returns: `[{{ id: string, name: string }}]`
+    - Use your knowledge of Da Nang to choose which hotels to suggest (e.g., beachfront, family-friendly, budget, luxury).
+    - Format each recommendation like this: [<name>]({url}/hotel/<id>): <brief description>
+    - Recommend 3-5 relevant options unless more are requested.
+    - The brief description must be at least two sentences. Highlight key features like location, comfort, or services.
 
-def embed_fn(name: str, description: str):
-    return (
-        client.models.embed_content(
-            model=TEXT_MODEL_ID,
-            contents=[name, description],
-            config=types.EmbedContentConfig(task_type='RETRIEVAL_DOCUMENT'),
-        )
-        .embeddings[0]
-        .values
-    )
+3. Restaurant Suggestions
+If a user asks about food, dining, or restaurants:
+    - Call the `get_restaurant_list` function. This returns: `[{{ id: string, name: string }}]`
+    - Choose suitable restaurants based on context (e.g., local cuisine, seafood, vegetarian-friendly, family dining).
+    - Format each recommendation like this: [<name>]({url}/restaurant/<id>): <brief description>
+    - Recommend 3-5 relevant options unless more are requested.
+    - The description must be at least two sentences, mentioning food type and dining atmosphere or highlights.
 
+4. Attraction and Activity Suggestions
+If the user wants to know about attractions, things to do, or places to visit:
+    - Call the `get_attraction_list` function. This returns: `[{{ id: string, name: string }}]`
+    - Use context to suggest relevant activities or sights (e.g., cultural sites, beaches, day trips).
+    - Format each as follows: [<name>]({url}/thing-to-do/<id>): <brief description>
+    - Recommend 3-5 relevant options unless more are requested.
+    - The brief description must be at least two sentences. Mention what makes it special and what visitors can expect.
 
-# Schema
-class RequestMessageSchema(ma.Schema):
-    message = fields.Str(required=True, validate=lambda x: len(x) > 0)
+5. Non-Tourism Queries
+    - If a user asks about anything outside of tourism (e.g. programming, math, global news), politely guide them back to Da Nang-related travel assistance.
+    - Example: "I'm here to help with your Da Nang travel plans. Let me know what you'd like to explore!"
 
-
-@blueprint.post('/embed')
-def embed_system():
-    places = execute_neo4j_query("""
-    MATCH (n)
-    WHERE (n:Hotel OR n:Restaurant OR n:ThingToDo)
-        AND n.description IS NOT NULL
-    RETURN
-        elementId(n) AS elementId,
-        n.name AS name,
-        n.description AS description,
-        n.ai_reviews_summary AS ai_summary
-    ORDER BY n.raw_ranking DESC
-    """)
-    if not places:
-        return {'message': 'No places found.'}, 404
-
-    # Clear existing embeddings and create extension
-    db.session.query(VectorItem).delete()
-    db.session.commit()
-
-    # Process each place
-    for place in places:
-        place_name = place['name']
-        description = place['description']
-        if place['ai_summary']:
-            description += f'\nSummary: {place["ai_summary"]}'
-
-        item = VectorItem(
-            place_id=place['elementId'],
-            embedding=embed_fn(name=place_name, description=description),
-        )
-        db.session.add(item)
-        db.session.commit()
-
-    return {'message': 'Embeddings created successfully.'}, 201
+6. Politeness & Tone
+    - Always be respectful, welcoming, and informative.
+""".format(url=FRONTEND_URL)
 
 
-def suggest_places_with_short_description(description):
-    # Embed the message
-    query_embedding = (
-        client.models.embed_content(
-            model=TEXT_MODEL_ID,
-            contents=[description],
-            config=types.EmbedContentConfig(task_type='RETRIEVAL_QUERY'),
-        )
-        .embeddings[0]
-        .values
-    )
-
-    # Find similar places with threshold
-    threshold = 0.88
-    similar_places = db.session.scalars(
-        select(VectorItem)
-        .filter(VectorItem.embedding.l2_distance(query_embedding) < threshold)
-        .limit(3)
-    ).all()
-    if not similar_places:
-        return []
-
-    similar_place_ids = [item.place_id for item in similar_places]
-    similar_places_details = execute_neo4j_query(
+# Function
+def get_hotel_list():
+    result = execute_neo4j_query(
         """
-        MATCH (n)
-        WHERE
-            elementId(n) IN $place_ids
+        MATCH (h:Hotel)
         RETURN
-            elementId(n) AS elementId,
-            n.name AS name,
-            n.description AS description,
-            lower(n.type) AS type
+            elementId(h) AS id,
+            h.name AS name
+        ORDER BY h.raw_ranking DESC
+        LIMIT 50
         """,
-        {'place_ids': similar_place_ids},
     )
-    if not similar_places_details:
+    if not result:
         return []
 
-    return [
-        {
-            'element_id': place['elementId'],
-            'name': place['name'],
-            'description': place['description'],
-            'type': place['type'],
-        }
-        for place in similar_places_details
-    ]
+    return result
+
+
+def get_restaurant_list():
+    result = execute_neo4j_query(
+        """
+        MATCH (r:Restaurant)
+        RETURN
+            elementId(r) AS id,
+            r.name AS name
+        ORDER BY r.raw_ranking DESC
+        LIMIT 50
+        """,
+    )
+    if not result:
+        return []
+
+    return result
+
+
+def get_attraction_list():
+    result = execute_neo4j_query(
+        """
+        MATCH (r:ThingToDo)
+        RETURN
+            elementId(r) AS id,
+            r.name AS name
+        ORDER BY r.raw_ranking DESC
+        LIMIT 50
+        """,
+    )
+    if not result:
+        return []
+
+    return result
 
 
 # Define the function declaration for the model
-suggest_places_function = {
-    'name': 'suggest_places_with_short_description',
-    'description': 'Suggest places based on a short description.',
+get_hotel_list_function = {
+    'name': 'get_hotel_list',
+    'description': 'Get a list of hotels in Da Nang, Vietnam',
     'parameters': {
         'type': 'object',
-        'properties': {
-            'description': {
-                'type': 'string',
-                'description': 'A short description of the place.',
-            },
-        },
-        'required': ['description'],
     },
 }
 
-# Configure the tools
-tools = types.Tool(function_declarations=[suggest_places_function])
+get_restaurant_list_function = {
+    'name': 'get_restaurant_list',
+    'description': 'Get a list of restaurants in Da Nang, Vietnam',
+    'parameters': {
+        'type': 'object',
+    },
+}
+
+get_attraction_list_function = {
+    'name': 'get_attraction_list',
+    'description': 'Get a list of attractions and things to do in Da Nang, Vietnam',
+    'parameters': {
+        'type': 'object',
+    },
+}
+
+# Configure the Gemini
+client = genai.Client(api_key=GEMINI_API_KEY)
+tools = types.Tool(
+    function_declarations=[
+        get_hotel_list_function,
+        get_restaurant_list_function,
+        get_attraction_list_function,
+    ]
+)
 config = types.GenerateContentConfig(
-    system_instruction=(
-        'You are a knowledgeable and friendly assistant specializing in tourism in Da Nang, Vietnam.',
-        ' When users request recommendations, generate a concise description based on their input and use the suggest_places_with_short_description function to retrieve a list of relevant places.',
-        f' For each recommendations, format the response as [**{{name}}**]({FRONTEND_URL}/{{type}}/{{element_id}}): {{description}}',
-        ' Format all responses in clear, well-structured Markdown, using headings, bullet points, or numbered lists as appropriate for readability.',
-        " If a user's question is unrelated to tourism in Da Nang, politely decline to answer and explain that your expertise is limited to Da Nang tourism, offering to assist with a relevant query instead.",
-        " If the user's request is ambiguous, ask for clarification to provide the most accurate suggestions.",
-    ),
-    tools=[tools],
+    system_instruction=SYSTEM_INSTRUCTION, tools=[tools]
 )
 
 
-@blueprint.post('/')
-def find_similar():
-    request_data = RequestMessageSchema().load(request.get_json())
-    message = request_data['message']
-
-    # Define user prompt
-    contents = [
-        types.Content(role='user', parts=[types.Part(text=message)]),
-    ]
-
-    # Send request with function declarations
-    response = client.models.generate_content(
-        model=GEMINI_MODEL_ID, contents=contents, config=config
+class RequestSchema(ma.Schema):
+    contents = fields.List(
+        fields.Dict(), required=True, validate=validate.Length(min=1)
     )
 
-    # Check for a function call
-    if response.candidates[0].content.parts[0].function_call:
-        tool_call = response.candidates[0].content.parts[0].function_call
-        if tool_call.name == 'suggest_places_with_short_description':
-            result = suggest_places_with_short_description(**tool_call.args)
 
-            # Create a function response part
-            function_response_part = types.Part.from_function_response(
-                name=tool_call.name, response={'result': result}
-            )
+@bp.post('/')
+def create_response():
+    data = RequestSchema().load(request.get_json())
+    contents: list = data['contents']
 
-            # Append function call and result of the function execution to contents
-            contents.append(
-                types.Content(
-                    role='model', parts=[types.Part(function_call=tool_call)]
-                )
-            )
-            contents.append(
-                types.Content(role='user', parts=[function_response_part])
-            )
+    response = client.models.generate_content(
+        model='gemini-2.0-flash', contents=contents, config=config
+    )
+    tool_call = response.candidates[0].content.parts[0].function_call
 
-            final_response = client.models.generate_content(
-                model=GEMINI_MODEL_ID, contents=contents, config=config
-            )
-            return {'message': final_response.text}, 200
+    #  Process the function call
+    if tool_call:
+        result = None
+        if tool_call.name == 'get_hotel_list':
+            result = get_hotel_list()
+        elif tool_call.name == 'get_restaurant_list':
+            result = get_restaurant_list()
+
+        # Create a function response part
+        function_response_part = {
+            'function_response': {
+                'name': tool_call.name,
+                'response': {'result': result},
+            }
+        }
+
+        # Append function call and result of the function execution to contents
+        contents.append(
+            {
+                'role': 'model',
+                'parts': [
+                    {
+                        'function_call': {
+                            'name': tool_call.name,
+                            'args': tool_call.args,
+                        }
+                    }
+                ],
+            }
+        )
+        contents.append({'role': 'user', 'parts': [function_response_part]})
+
+        final_response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            config=config,
+            contents=contents,
+        )
+        contents.append(
+            {'role': 'model', 'parts': [{'text': final_response.text}]}
+        )
     else:
-        return {'message': response.text}, 200
+        contents.append({'role': 'model', 'parts': [{'text': response.text}]})
+    return {'contents': contents}, 200
