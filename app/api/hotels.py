@@ -103,6 +103,7 @@ class ShortHotelSchema(ma.Schema):
     min_price = fields.Integer(dump_only=True, allow_none=True)
     max_price = fields.Integer(dump_only=True, allow_none=True)
     rating = fields.Float(required=False, allow_none=True)
+    hotel_class = fields.String(required=False, allow_none=True)
     rating_histogram = fields.List(
         fields.Integer(), required=False, default=list
     )
@@ -173,7 +174,6 @@ class HotelSchema(ShortHotelSchema):
     ai_reviews_summary = fields.String(required=False, allow_none=True)
     description = fields.String(required=False, allow_none=True)
     features = fields.List(fields.String(), required=False, default=list)
-    hotel_class = fields.String(required=False, allow_none=True)
     number_of_rooms = fields.Integer(required=False)
     price_range = fields.String(required=False, allow_none=True)
     min_price = fields.Integer(dump_only=True, allow_none=True)
@@ -403,7 +403,8 @@ def _get_all_hotels(page, size, offset, user_id):
     MATCH (h:Hotel)
     OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
     OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+    OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class
     ORDER BY h.raw_ranking DESC
     SKIP $offset
     LIMIT $size
@@ -481,7 +482,8 @@ def _search_hotels(search, page, size, offset, user_id):
     WHERE toLower(h.name) CONTAINS toLower($search)
     OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
     OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+    OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class
     ORDER BY h.raw_ranking DESC
     SKIP $offset
     LIMIT $size
@@ -605,7 +607,7 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
         """
         
         # Main query using subquery pattern to avoid optimization bug
-        hotels_query = f"""
+        main_query = f"""
         {base_match}
         {additional_where}
         WITH h
@@ -623,7 +625,7 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
         RETURN count(h) AS total_count
         """
         
-        hotels_query = """
+        main_query = """
         MATCH (h:Hotel)
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
         OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
@@ -638,7 +640,7 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
     total_count = total_count_result[0]['total_count']
 
     # Execute main query
-    result = execute_neo4j_query(hotels_query, query_params)
+    result = execute_neo4j_query(main_query, query_params)
     hotels_data = _process_hotel_results(result, user_id)
 
     # Create paginated response
@@ -665,9 +667,12 @@ def _process_hotel_results(result, user_id):
         record['h']['element_id'] = record['element_id']
         record['h']['price_levels'] = record['price_levels']
         record['h']['city'] = record['city']
+        record['h']['hotel_class'] = record.get('hotel_class')  # Use .get for safety
         del record['element_id']
         del record['price_levels']
         del record['city']
+        if 'hotel_class' in record:
+            del record['hotel_class']
 
     hotels_data = [record['h'] for record in result]
     
@@ -696,6 +701,8 @@ def _process_hotel_results(result, user_id):
 
 
 @blueprint.get('/<hotel_id>')
+@blueprint.get('/<hotel_id>/')
+
 @jwt_required(optional=True)
 def get_hotel(hotel_id):
     schema = HotelSchema()
