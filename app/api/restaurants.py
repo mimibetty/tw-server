@@ -7,7 +7,17 @@ from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import create_paging, execute_neo4j_query, get_redis, delete_place_and_related_data
+from app.utils import (
+    create_paging,
+    execute_neo4j_query,
+    get_all_cuisines,
+    get_all_dietary_restrictions,
+    get_all_dishes,
+    get_all_meal_types,
+    get_all_restaurant_features,
+    get_redis,
+    delete_place_and_related_data,
+)
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('restaurants', __name__, url_prefix='/restaurants')
@@ -135,6 +145,41 @@ class RestaurantSchema(ShortRestaurantSchema):
     meal_types = fields.List(fields.String(), required=False, default=list)
     cuisines = fields.List(fields.String(), required=False, default=list)
     traveler_choice_award = fields.Boolean(required=False, default=False)
+
+
+@blueprint.get('/cuisines/')
+def get_cuisines():
+    """Get all available cuisines for restaurants."""
+    cuisines = get_all_cuisines()
+    return {'cuisines': cuisines}, 200
+
+
+@blueprint.get('/meal-types/')
+def get_meal_types():
+    """Get all available meal types for restaurants."""
+    meal_types = get_all_meal_types()
+    return {'meal_types': meal_types}, 200
+
+
+@blueprint.get('/features/')
+def get_features():
+    """Get all available features (amenities) for restaurants."""
+    features = get_all_restaurant_features()
+    return {'features': features}, 200
+
+
+@blueprint.get('/dietary-restrictions/')
+def get_dietary_restrictions():
+    """Get all available dietary restrictions for restaurants."""
+    restrictions = get_all_dietary_restrictions()
+    return {'dietary_restrictions': restrictions}, 200
+
+
+@blueprint.get('/dishes/')
+def get_dishes():
+    """Get all available dishes for restaurants."""
+    dishes = get_all_dishes()
+    return {'dishes': dishes}, 200
 
 
 @blueprint.post('/')
@@ -276,16 +321,176 @@ def get_restaurants():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
-    search = request.args.get('search', default='', type=str)
     offset = (page - 1) * size
 
+    # Get search and filter parameters
+    search = request.args.get('search', default='', type=str)
+    rating = request.args.get('rating', type=float) #ok
+    cuisines = request.args.get('cuisines', type=str)
+    meal_types = request.args.get('meal_types', type=str)  #ok
+    features = request.args.get('features', type=str)  # Amenities #ok
+    dietary_restrictions = request.args.get('dietary_restrictions', type=str)
+    dishes = request.args.get('dishes', type=str)
+
+    print('--------------------------------')
+    print('search', search)
+    print('rating', rating)
+    print('cuisines', cuisines)
+    print('meal_types', meal_types)
+    print('features', features)
+    print('dietary_restrictions', dietary_restrictions)
+    print('dishes', dishes)
+    print('--------------------------------')
     user_id = None
     try:
         user_id = get_jwt_identity()
     except Exception:
         pass
 
-    # Check if the result is cached
+    # Determine operation mode
+    is_search_mode = bool(search.strip())
+    is_filter_mode = any(
+        [rating, cuisines, meal_types, features, dietary_restrictions, dishes]
+    )
+
+    if is_search_mode and is_filter_mode:
+        return {
+            'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'
+        }, 400
+
+    if not is_search_mode and not is_filter_mode:
+        return _get_all_restaurants(page, size, offset, user_id)
+    elif is_search_mode:
+        return _search_restaurants(search, page, size, offset, user_id)
+    else:  # is_filter_mode
+        # Parse comma-separated strings into lists
+        cuisine_list = cuisines.split(',') if cuisines else []
+        meal_type_list = meal_types.split(',') if meal_types else []
+        feature_list = features.split(',') if features else []
+        dietary_list = (
+            dietary_restrictions.split(',') if dietary_restrictions else []
+        )
+        dish_list = dishes.split(',') if dishes else []
+
+        return _filter_restaurants(
+            rating=rating,
+            cuisines=cuisine_list,
+            meal_types=meal_type_list,
+            features=feature_list,
+            dietary_restrictions=dietary_list,
+            dishes=dish_list,
+            page=page,
+            size=size,
+            offset=offset,
+            user_id=user_id,
+        )
+
+
+def _process_restaurant_results(result, user_id):
+    """Helper function to process Neo4j results for restaurants."""
+    # Add element_id, price_levels, and city to each restaurant record
+    for record in result:
+        record['r']['element_id'] = record['element_id']
+        record['r']['price_levels'] = record.get('price_levels', [])
+        record['r']['cuisines'] = record.get('cuisines', [])
+        record['r']['meal_types'] = record.get('meal_types', [])
+        record['r']['features'] = record.get('features', [])
+        if record['city']:
+            record['r']['city'] = record['city']
+
+    restaurants_data = [record['r'] for record in result]
+
+    # Add is_favorite field
+    if user_id:
+        restaurant_ids = [r['element_id'] for r in restaurants_data]
+        favourites = (
+            db.session.query(UserFavourite.place_id)
+            .filter(
+                UserFavourite.user_id == user_id,
+                UserFavourite.place_id.in_(restaurant_ids),
+            )
+            .all()
+        )
+        favourite_ids = set(f[0] for f in favourites)
+        for r in restaurants_data:
+            r['is_favorite'] = r['element_id'] in favourite_ids
+    else:
+        for r in restaurants_data:
+            r['is_favorite'] = False
+
+    return restaurants_data
+
+
+def _get_all_restaurants(page, size, offset, user_id):
+    """Get all restaurants with pagination."""
+    redis = get_redis()
+    cache_key = f'restaurants:page={page}:size={size}:all'
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            restaurants = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                restaurant_ids = [r['element_id'] for r in restaurants['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(restaurant_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for r in restaurants['data']:
+                    r['is_favorite'] = r['element_id'] in favourite_ids
+            else:
+                for r in restaurants['data']:
+                    r['is_favorite'] = False
+            return restaurants, 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    count_query = 'MATCH (r:Restaurant) RETURN count(r) AS total_count'
+    total_count_result = execute_neo4j_query(count_query)
+    total_count = total_count_result[0]['total_count']
+
+    restaurants_query = """
+    MATCH (r:Restaurant)
+    OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+    OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
+    OPTIONAL MATCH (r)-[:HAS_CUISINE]->(cu:Cuisine)
+    OPTIONAL MATCH (r)-[:SERVES_MEAL]->(mt:MealType)
+    OPTIONAL MATCH (r)-[:HAS_FEATURE]->(f:Feature)
+    WITH r, c, pl, collect(DISTINCT cu.name) AS cuisines, collect(DISTINCT mt.name) AS meal_types, collect(DISTINCT f.name) AS features
+    RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, cuisines, meal_types, features
+    ORDER BY r.raw_ranking DESC
+    SKIP $offset
+    LIMIT $size
+    """
+
+    result = execute_neo4j_query(
+        restaurants_query, {'offset': offset, 'size': size}
+    )
+    restaurants_data = _process_restaurant_results(result, user_id)
+
+    response = create_paging(
+        data=ShortRestaurantSchema(many=True).dump(restaurants_data),
+        page=page,
+        size=size,
+        offset=offset,
+        total_count=total_count,
+    )
+
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return response, 200
+
+
+def _search_restaurants(search, page, size, offset, user_id):
+    """Search restaurants by name."""
     redis = get_redis()
     cache_key = f'restaurants:page={page}:size={size}:search={search}'
     try:
@@ -311,73 +516,35 @@ def get_restaurants():
                     r['is_favorite'] = False
             return restaurants, 200
     except Exception as e:
-        logger.exception(e)
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Create Cypher query parameters
-    query_params = {'offset': offset, 'size': size}
-    
-    # Base query with name search filter if provided
-    name_filter = ""
-    if search:
-        name_filter = "WHERE toLower(r.name) CONTAINS toLower($search) "
-        query_params['search'] = search
+    query_params = {'offset': offset, 'size': size, 'search': search}
 
-    # Get the total count of restaurants matching the search criteria
-    count_query = f"""
+    count_query = """
     MATCH (r:Restaurant)
-    {name_filter}
+    WHERE toLower(r.name) CONTAINS toLower($search)
     RETURN count(r) AS total_count
     """
-    
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
-    # Get the restaurants with pagination, their price_levels, and city
-    restaurants_query = f"""
+    restaurants_query = """
     MATCH (r:Restaurant)
-    {name_filter}
+    WHERE toLower(r.name) CONTAINS toLower($search)
     OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
     OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
-    RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+    OPTIONAL MATCH (r)-[:HAS_CUISINE]->(cu:Cuisine)
+    OPTIONAL MATCH (r)-[:SERVES_MEAL]->(mt:MealType)
+    OPTIONAL MATCH (r)-[:HAS_FEATURE]->(f:Feature)
+    WITH r, c, pl, collect(DISTINCT cu.name) AS cuisines, collect(DISTINCT mt.name) AS meal_types, collect(DISTINCT f.name) AS features
+    RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, cuisines, meal_types, features
     ORDER BY r.raw_ranking DESC
     SKIP $offset
     LIMIT $size
     """
-    
     result = execute_neo4j_query(restaurants_query, query_params)
+    restaurants_data = _process_restaurant_results(result, user_id)
 
-    # Add element_id, price_levels, and city to each restaurant record
-    for record in result:
-        record['r']['element_id'] = record['element_id']
-        record['r']['price_levels'] = record['price_levels']
-        if record['city']:
-            record['r']['city'] = record['city']
-        del record['element_id']
-        del record['price_levels']
-        del record['city']
-
-    restaurants_data = [record['r'] for record in result]
-
-    # Add is_favorite field
-    if user_id:
-        restaurant_ids = [r['element_id'] for r in restaurants_data]
-        favourites = (
-            db.session.query(UserFavourite.place_id)
-            .filter(
-                UserFavourite.user_id == user_id,
-                UserFavourite.place_id.in_(restaurant_ids),
-            )
-            .all()
-        )
-        favourite_ids = set(f[0] for f in favourites)
-        for r in restaurants_data:
-            r['is_favorite'] = r['element_id'] in favourite_ids
-    else:
-        for r in restaurants_data:
-            r['is_favorite'] = False
-
-    # Create paginated response
     response = create_paging(
         data=ShortRestaurantSchema(many=True).dump(restaurants_data),
         page=page,
@@ -386,11 +553,147 @@ def get_restaurants():
         total_count=total_count,
     )
 
-    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
         logger.warning('Redis is not available to set data: %s', e)
+
+    return response, 200
+
+
+def _filter_restaurants(
+    rating,
+    cuisines,
+    meal_types,
+    features,
+    dietary_restrictions,
+    dishes,
+    page,
+    size,
+    offset,
+    user_id,
+):
+    """Filter restaurants based on various criteria."""
+    redis = get_redis()
+
+    # Build a dynamic cache key
+    cache_parts = [f'page={page}', f'size={size}', 'filter']
+    if rating is not None:
+        cache_parts.append(f'rating={rating}')
+    if cuisines:
+        cache_parts.append(f"cuisines={','.join(sorted(cuisines))}")
+    if meal_types:
+        cache_parts.append(f"meal_types={','.join(sorted(meal_types))}")
+    if features:
+        cache_parts.append(f"features={','.join(sorted(features))}")
+    if dietary_restrictions:
+        cache_parts.append(
+            f"dietary_restrictions={','.join(sorted(dietary_restrictions))}"
+        )
+    if dishes:
+        cache_parts.append(f"dishes={','.join(sorted(dishes))}")
+    cache_key = f'restaurants:{":".join(cache_parts)}'
+
+    # Check Redis cache first
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            restaurants = json.loads(cached_response)
+            # Add is_favorite field for authenticated users
+            if user_id:
+                restaurant_ids = [r['element_id'] for r in restaurants['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(restaurant_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for r in restaurants['data']:
+                    r['is_favorite'] = r['element_id'] in favourite_ids
+            else:
+                for r in restaurants['data']:
+                    r['is_favorite'] = False
+            return restaurants, 200
+    except Exception as e:
+        logger.warning('Redis cache unavailable: %s', e)
+
+    # Build the query dynamically
+    query_params = {'offset': offset, 'size': size}
+    where_clauses = []
+
+    if rating is not None:
+        where_clauses.append('r.rating >= $rating')
+        query_params['rating'] = rating
+    if cuisines:
+        where_clauses.append(
+            'ALL(c_name IN $cuisines WHERE (r)-[:HAS_CUISINE]->(:Cuisine {name: c_name}))'
+        )
+        query_params['cuisines'] = cuisines
+    if meal_types:
+        where_clauses.append(
+            'ALL(mt_name IN $meal_types WHERE (r)-[:SERVES_MEAL]->(:MealType {name: mt_name}))'
+        )
+        query_params['meal_types'] = meal_types
+    if features:
+        where_clauses.append(
+            'ALL(f_name IN $features WHERE (r)-[:HAS_FEATURE]->(:Feature {name: f_name}))'
+        )
+        query_params['features'] = features
+    if dietary_restrictions:
+        where_clauses.append(
+            'ALL(dr_name IN $dietary_restrictions WHERE dr_name IN r.dietary_restrictions)'
+        )
+        query_params['dietary_restrictions'] = dietary_restrictions
+    if dishes:
+        where_clauses.append(
+            'ALL(d_name IN $dishes WHERE d_name IN r.dishes)'
+        )
+        query_params['dishes'] = dishes
+
+    where_str = ''
+    if where_clauses:
+        where_str = 'WHERE ' + ' AND '.join(where_clauses)
+
+    count_query = f"""
+    MATCH (r:Restaurant)
+    {where_str}
+    RETURN count(r) AS total_count
+    """
+    total_count_result = execute_neo4j_query(count_query, query_params)
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+
+    restaurants_query = f"""
+    MATCH (r:Restaurant)
+    {where_str}
+    OPTIONAL MATCH (r)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
+    OPTIONAL MATCH (r)-[:LOCATED_IN]->(c:City)
+    OPTIONAL MATCH (r)-[:HAS_CUISINE]->(cu:Cuisine)
+    OPTIONAL MATCH (r)-[:SERVES_MEAL]->(mt:MealType)
+    OPTIONAL MATCH (r)-[:HAS_FEATURE]->(f:Feature)
+    WITH r, c, pl, collect(DISTINCT cu.name) AS cuisines, collect(DISTINCT mt.name) AS meal_types, collect(DISTINCT f.name) AS features
+    RETURN r, elementId(r) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, cuisines, meal_types, features
+    ORDER BY r.raw_ranking DESC
+    SKIP $offset
+    LIMIT $size
+    """
+    result = execute_neo4j_query(restaurants_query, query_params)
+    restaurants_data = _process_restaurant_results(result, user_id)
+
+    response = create_paging(
+        data=ShortRestaurantSchema(many=True).dump(restaurants_data),
+        page=page,
+        size=size,
+        offset=offset,
+        total_count=total_count,
+    )
+
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis cache set failed: %s', e)
 
     return response, 200
 
