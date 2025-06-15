@@ -7,7 +7,13 @@ from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import create_paging, execute_neo4j_query, get_redis, delete_place_and_related_data
+from app.utils import (
+    create_paging,
+    execute_neo4j_query,
+    get_all_hotel_features,
+    get_redis,
+    delete_place_and_related_data,
+)
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('hotels', __name__, url_prefix='/hotels')
@@ -186,6 +192,13 @@ class HotelSchema(ShortHotelSchema):
         return value
 
 
+@blueprint.get('/features/')
+def get_features():
+    """Get all available features (amenities) for hotels."""
+    features = get_all_hotel_features()
+    return {'features': features}, 200
+
+
 @blueprint.post('/')
 def create_hotel():
     data = HotelSchema().load(request.get_json())
@@ -323,6 +336,7 @@ def get_hotels():
     price = request.args.get('price', type=int)
     hotel_class = request.args.get('hotel_class', type=str)  # Changed from float to str
     rating = request.args.get('rating', type=float)
+    features = request.args.get('features', type=str)
     
     # Normalize hotel_class format to match database (e.g., "3" -> "3.0", "5" -> "5.0")
     if hotel_class is not None:
@@ -342,7 +356,9 @@ def get_hotels():
 
     # Determine operation mode: search vs filter
     is_search_mode = bool(search.strip())
-    is_filter_mode = any([price is not None, hotel_class is not None, rating is not None])
+    is_filter_mode = any(
+        [price is not None, hotel_class is not None, rating is not None, features]
+    )
     
     if is_search_mode and is_filter_mode:
         return {'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'}, 400
@@ -353,7 +369,10 @@ def get_hotels():
     elif is_search_mode:
         return _search_hotels(search, page, size, offset, user_id)
     else:
-        return _filter_hotels(price, hotel_class, rating, page, size, offset, user_id)
+        feature_list = features.split(',') if features else []
+        return _filter_hotels(
+            price, hotel_class, rating, feature_list, page, size, offset, user_id
+        )
 
 
 def _get_all_hotels(page, size, offset, user_id):
@@ -404,7 +423,8 @@ def _get_all_hotels(page, size, offset, user_id):
     OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
     OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
     OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
-    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class
+    OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
+    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class, collect(DISTINCT f.name) AS features
     ORDER BY h.raw_ranking DESC
     SKIP $offset
     LIMIT $size
@@ -483,7 +503,8 @@ def _search_hotels(search, page, size, offset, user_id):
     OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
     OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
     OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
-    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class
+    OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
+    RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class, collect(DISTINCT f.name) AS features
     ORDER BY h.raw_ranking DESC
     SKIP $offset
     LIMIT $size
@@ -512,7 +533,9 @@ def _search_hotels(search, page, size, offset, user_id):
     return response, 200
 
 
-def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
+def _filter_hotels(
+    price, hotel_class, rating, features, page, size, offset, user_id
+):
     """
     Filter hotels based on criteria using pure database-level filtering.
     All filters (price, rating, hotel_class) are applied directly in Neo4j for optimal performance.
@@ -526,6 +549,8 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
         cache_parts.append(f'hotel_class={hotel_class}')
     if rating is not None:
         cache_parts.append(f'rating={rating}')
+    if features:
+        cache_parts.append(f"features={','.join(sorted(features))}")
     
     cache_key = f'hotels:{":".join(cache_parts)}'
     
@@ -561,7 +586,12 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
     
     # Determine if we need subquery approach to avoid Neo4j optimization bug
     # Use subquery if we have any filtering (price, hotel_class, or rating)
-    needs_subquery = price is not None or hotel_class is not None or rating is not None
+    needs_subquery = (
+        price is not None
+        or hotel_class is not None
+        or rating is not None
+        or features
+    )
     
     if needs_subquery:
         # Use subquery approach to avoid Neo4j optimization bug with ORDER BY + filtering
@@ -588,6 +618,12 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
             additional_filters.append("h.rating >= $rating")
             query_params['rating'] = rating
         
+        if features:
+            additional_filters.append(
+                'ALL(f_name IN $features WHERE (h)-[:HAS_FEATURE]->(:Feature {name: f_name}))'
+            )
+            query_params['features'] = features
+        
         # Build WHERE clause for additional filters
         if additional_filters:
             if hotel_class is not None:
@@ -613,7 +649,9 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
         WITH h
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
         OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+        OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+        OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class, collect(DISTINCT f.name) AS features
         ORDER BY h.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -629,7 +667,9 @@ def _filter_hotels(price, hotel_class, rating, page, size, offset, user_id):
         MATCH (h:Hotel)
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
         OPTIONAL MATCH (h)-[:LOCATED_IN]->(c:City)
-        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city
+        OPTIONAL MATCH (h)-[:BELONGS_TO_CLASS]->(hc:HotelClass)
+        OPTIONAL MATCH (h)-[:HAS_FEATURE]->(f:Feature)
+        RETURN h, elementId(h) AS element_id, collect(DISTINCT pl.level) AS price_levels, c AS city, hc.name AS hotel_class, collect(DISTINCT f.name) AS features
         ORDER BY h.raw_ranking DESC
         SKIP $offset
         LIMIT $size
@@ -668,11 +708,14 @@ def _process_hotel_results(result, user_id):
         record['h']['price_levels'] = record['price_levels']
         record['h']['city'] = record['city']
         record['h']['hotel_class'] = record.get('hotel_class')  # Use .get for safety
+        record['h']['features'] = record.get('features', [])  # Add features
         del record['element_id']
         del record['price_levels']
         del record['city']
         if 'hotel_class' in record:
             del record['hotel_class']
+        if 'features' in record:
+            del record['features']
 
     hotels_data = [record['h'] for record in result]
     

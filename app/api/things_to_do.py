@@ -7,7 +7,14 @@ from marshmallow import ValidationError, fields, pre_load, validates
 
 from app.extensions import ma
 from app.models import UserFavourite, db
-from app.utils import create_paging, execute_neo4j_query, get_redis, delete_place_and_related_data
+from app.utils import (
+    create_paging,
+    execute_neo4j_query,
+    get_all_subcategories,
+    get_all_subtypes,
+    get_redis,
+    delete_place_and_related_data
+)
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('things_to_do', __name__, url_prefix='/things-to-do')
@@ -111,6 +118,20 @@ class ThingToDoSchema(ShortThingToDoSchema):
     subcategories = fields.List(fields.String(), required=False, default=list)
 
 
+@blueprint.get('/subtypes/')
+def get_subtypes():
+    """Get all available subtypes for things to do."""
+    subtypes = get_all_subtypes()
+    return {'subtypes': subtypes}, 200
+
+
+@blueprint.get('/subcategories/')
+def get_subcategories():
+    """Get all available subcategories for things to do."""
+    subcategories = get_all_subcategories()
+    return {'subcategories': subcategories}, 200
+
+
 @blueprint.post('/')
 def create_thing_to_do():
     schema = ThingToDoSchema()
@@ -202,8 +223,16 @@ def get_things_to_do():
     # Get query parameters for pagination
     page = request.args.get('page', default=1, type=int)
     size = request.args.get('size', default=10, type=int)
-    search = request.args.get('search', default='', type=str)
     offset = (page - 1) * size
+
+    # Get search and filter parameters
+    search = request.args.get('search', default='', type=str)
+    rating = request.args.get('rating', type=float)
+    subtypes = request.args.get('subtypes', type=str)
+    subcategories = request.args.get('subcategories', type=str)
+    print("Subtypes:", subtypes)
+    print("Subcategories:", subcategories)
+    # Get sort order
     sort_order = request.args.get('order', default='desc', type=str)
     sort_order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
 
@@ -213,6 +242,116 @@ def get_things_to_do():
     except Exception:
         pass
 
+    # Determine operation mode
+    is_search_mode = bool(search.strip())
+    is_filter_mode = (
+        rating is not None or subtypes is not None or subcategories is not None
+    )
+
+    if is_search_mode and is_filter_mode:
+        return {
+            'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'
+        }, 400
+
+    if not is_search_mode and not is_filter_mode:
+        # Default behavior: return all things to do
+        return _get_all_things_to_do(page, size, offset, user_id, sort_order)
+    elif is_search_mode:
+        return _search_things_to_do(
+            search, page, size, offset, user_id, sort_order
+        )
+    else:  # is_filter_mode
+        # Parse comma-separated strings into lists
+        subtype_list = subtypes.split(',') if subtypes else []
+        subcategory_list = subcategories.split(',') if subcategories else []
+
+        return _filter_things_to_do(
+            rating,
+            subtype_list,
+            subcategory_list,
+            page,
+            size,
+            offset,
+            user_id,
+            sort_order,
+        )
+
+
+def _get_all_things_to_do(page, size, offset, user_id, sort_order):
+    """Get all things to do with pagination."""
+    # Check if the result is cached
+    redis = get_redis()
+    cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}:all'
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            things = json.loads(cached_response)
+            # Add is_favorite field if user_id exists
+            if user_id:
+                thing_ids = [t['element_id'] for t in things['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(thing_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for t in things['data']:
+                    t['is_favorite'] = t['element_id'] in favourite_ids
+            else:
+                for t in things['data']:
+                    t['is_favorite'] = False
+            return things, 200
+    except Exception as e:
+        logger.warning('Redis is not available to get data: %s', e)
+
+    # Get the total count of all things to do
+    count_query = 'MATCH (t:ThingToDo) RETURN count(t) AS total_count'
+    total_count_result = execute_neo4j_query(count_query)
+    total_count = total_count_result[0]['total_count']
+
+    # Get all things to do with pagination
+    things_query = f"""
+    MATCH (t:ThingToDo)
+    OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
+    OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
+    OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
+    WITH t, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories, c
+    RETURN t, elementId(t) AS element_id, subtypes, subcategories, c AS city
+    ORDER BY t.raw_ranking {sort_order}
+    SKIP $offset
+    LIMIT $size
+    """
+
+    result = execute_neo4j_query(
+        things_query, {'offset': offset, 'size': size}
+    )
+
+    # Process results
+    processed_results = _process_things_to_do_results(result, user_id)
+
+    # Create paginated response
+    response = create_paging(
+        data=ShortThingToDoSchema(many=True).dump(processed_results),
+        page=page,
+        size=size,
+        offset=offset,
+        total_count=total_count,
+    )
+
+    # Cache the response for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return response, 200
+
+
+def _search_things_to_do(search, page, size, offset, user_id, sort_order):
+    """Search things to do by name."""
     # Check if the result is cached
     redis = get_redis()
     cache_key = f'things-to-do:page={page}:size={size}:order={sort_order}:search={search}'
@@ -241,29 +380,22 @@ def get_things_to_do():
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
 
-    # Create Cypher query parameters
-    query_params = {'offset': offset, 'size': size}
-    
-    # Base query with name search filter if provided
-    name_filter = ""
-    if search:
-        name_filter = "WHERE toLower(t.name) CONTAINS toLower($search) "
-        query_params['search'] = search
+    query_params = {'offset': offset, 'size': size, 'search': search}
 
     # Get the total count of things to do matching the search criteria
-    count_query = f"""
+    count_query = """
     MATCH (t:ThingToDo)
-    {name_filter}
+    WHERE toLower(t.name) CONTAINS toLower($search)
     RETURN count(t) AS total_count
     """
-    
+
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
-    # Get the things to do with pagination, including city
+    # Get the things to do with pagination
     things_query = f"""
     MATCH (t:ThingToDo)
-    {name_filter}
+    WHERE toLower(t.name) CONTAINS toLower($search)
     OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
     OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
     OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
@@ -273,10 +405,149 @@ def get_things_to_do():
     SKIP $offset
     LIMIT $size
     """
-    
+
     result = execute_neo4j_query(things_query, query_params)
 
-    # Process each thing to do record
+    # Process results
+    processed_results = _process_things_to_do_results(result, user_id)
+
+    # Create paginated response
+    response = create_paging(
+        data=ShortThingToDoSchema(many=True).dump(processed_results),
+        page=page,
+        size=size,
+        offset=offset,
+        total_count=total_count,
+    )
+
+    # Cache the response for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis is not available to set data: %s', e)
+
+    return response, 200
+
+
+def _filter_things_to_do(
+    rating, subtypes, subcategories, page, size, offset, user_id, sort_order
+):
+    """Filter things to do by rating and subtypes/subcategories."""
+    redis = get_redis()
+
+    # Build a dynamic cache key
+    cache_parts = [
+        f'page={page}',
+        f'size={size}',
+        f'order={sort_order}',
+        'filter',
+    ]
+    if rating is not None:
+        cache_parts.append(f'rating={rating}')
+    if subtypes:
+        cache_parts.append(f"subtypes={','.join(sorted(subtypes))}")
+    if subcategories:
+        cache_parts.append(f"subcategories={','.join(sorted(subcategories))}")
+    cache_key = f'things-to-do:{":".join(cache_parts)}'
+
+    # Check Redis cache first
+    try:
+        cached_response = redis.get(cache_key)
+        if cached_response:
+            things = json.loads(cached_response)
+            # Add is_favorite field for authenticated users
+            if user_id:
+                thing_ids = [t['element_id'] for t in things['data']]
+                favourites = (
+                    db.session.query(UserFavourite.place_id)
+                    .filter(
+                        UserFavourite.user_id == user_id,
+                        UserFavourite.place_id.in_(thing_ids),
+                    )
+                    .all()
+                )
+                favourite_ids = set(f[0] for f in favourites)
+                for t in things['data']:
+                    t['is_favorite'] = t['element_id'] in favourite_ids
+            else:
+                for t in things['data']:
+                    t['is_favorite'] = False
+            return things, 200
+    except Exception as e:
+        logger.warning('Redis cache unavailable: %s', e)
+
+    # Build the query dynamically
+    query_params = {'offset': offset, 'size': size}
+    where_clauses = []
+
+    if rating is not None:
+        where_clauses.append('t.rating >= $rating')
+        query_params['rating'] = rating
+    if subtypes:
+        # This clause checks if a place has ALL of the specified subtypes
+        where_clauses.append(
+            'ALL(subtype_name IN $subtypes WHERE (t)-[:HAS_SUBTYPE]->(:Subtype {name: subtype_name}))'
+        )
+        query_params['subtypes'] = subtypes
+    if subcategories:
+        # This clause checks if a place has ALL of the specified subcategories
+        where_clauses.append(
+            'ALL(subcategory_name IN $subcategories WHERE (t)-[:HAS_SUBCATEGORY]->(:Subcategory {name: subcategory_name}))'
+        )
+        query_params['subcategories'] = subcategories
+
+    where_str = ''
+    if where_clauses:
+        where_str = 'WHERE ' + ' AND '.join(where_clauses)
+
+    # Get the total count of things to do matching the filter
+    count_query = f"""
+    MATCH (t:ThingToDo)
+    {where_str}
+    RETURN count(t) AS total_count
+    """
+    total_count_result = execute_neo4j_query(count_query, query_params)
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+
+    # Get the things to do with pagination and filter
+    things_query = f"""
+    MATCH (t:ThingToDo)
+    {where_str}
+    OPTIONAL MATCH (t)-[:LOCATED_IN]->(c:City)
+    OPTIONAL MATCH (t)-[:HAS_SUBTYPE]->(st:Subtype)
+    OPTIONAL MATCH (t)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
+    WITH t, c, collect(DISTINCT st.name) AS subtypes, collect(DISTINCT sc.name) AS subcategories
+    RETURN t, elementId(t) AS element_id, subtypes, subcategories, c AS city
+    ORDER BY t.raw_ranking {sort_order}
+    SKIP $offset
+    LIMIT $size
+    """
+
+    result = execute_neo4j_query(things_query, query_params)
+
+    # Process results
+    processed_results = _process_things_to_do_results(result, user_id)
+
+    # Create paginated response
+    response = create_paging(
+        data=ShortThingToDoSchema(many=True).dump(processed_results),
+        page=page,
+        size=size,
+        offset=offset,
+        total_count=total_count,
+    )
+
+    # Cache the result for 6 hours
+    try:
+        redis.set(cache_key, json.dumps(response), ex=21600)
+    except Exception as e:
+        logger.warning('Redis cache set failed: %s', e)
+
+    return response, 200
+
+
+def _process_things_to_do_results(result, user_id):
+    """Process things to do query results."""
     processed_results = []
     for record in result:
         thing = record['t']
@@ -292,7 +563,9 @@ def get_things_to_do():
             if rh and isinstance(rh, list) and len(rh) == 5:
                 total = sum(rh)
                 if total > 0:
-                    rating = sum((i + 1) * rh[i] for i in range(5)) / total
+                    rating = (
+                        sum((i + 1) * rh[i] for i in range(5)) / total
+                    )
                     thing['rating'] = round(rating, 1)
         processed_results.append(thing)
 
@@ -314,22 +587,7 @@ def get_things_to_do():
         for t in processed_results:
             t['is_favorite'] = False
 
-    # Create paginated response
-    response = create_paging(
-        data=ShortThingToDoSchema(many=True).dump(processed_results),
-        page=page,
-        size=size,
-        offset=offset,
-        total_count=total_count,
-    )
-
-    # Cache the response for 6 hours (without is_favorite, since it's user-specific)
-    try:
-        redis.set(cache_key, json.dumps(response), ex=21600)
-    except Exception as e:
-        logger.warning('Redis is not available to set data: %s', e)
-
-    return response, 200
+    return processed_results
 
 
 @blueprint.get('/<thing_to_do_id>/')

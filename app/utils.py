@@ -403,6 +403,275 @@ def delete_place_and_related_data(place_id: str) -> dict:
         return deletion_summary
 
 
+def get_all_subtypes():
+    """Fetch all unique subtypes for Things To Do from Neo4j."""
+    cache_key = 'thingstodo_subtypes:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        query = "MATCH (st:Subtype) RETURN DISTINCT st.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        data = [item['name'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all subtypes: {str(e)}")
+        return []
+
+
+def get_all_subcategories():
+    """Fetch all unique subcategories for Things To Do from Neo4j."""
+    cache_key = 'thingstodo_subcategories:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        query = "MATCH (sc:Subcategory) RETURN DISTINCT sc.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        data = [item['name'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all subcategories: {str(e)}")
+        return []
+
+
+def get_all_cuisines():
+    """Fetch all unique cuisines for Restaurants from Neo4j."""
+    cache_key = 'restaurant_cuisines:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        query = "MATCH (c:Cuisine) RETURN DISTINCT c.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        data = [item['name'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all cuisines: {str(e)}")
+        return []
+
+
+def get_all_meal_types():
+    """Fetch all unique meal types for Restaurants from Neo4j."""
+    cache_key = 'restaurant_mealtypes:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        query = "MATCH (mt:MealType) RETURN DISTINCT mt.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        data = [item['name'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all meal types: {str(e)}")
+        return []
+
+
+def get_all_restaurant_features():
+    """Fetch all unique features (amenities) for Restaurants from Neo4j."""
+    cache_key = 'restaurant_features:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        # Features can be linked to other place types, so we specify the connection to Restaurant
+        query = "MATCH (:Restaurant)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        data = [item['name'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all restaurant features: {str(e)}")
+        return []
+
+
+def get_all_dietary_restrictions():
+    """Fetch all unique dietary restrictions from Restaurant node properties."""
+    cache_key = 'restaurant_dietary_restrictions:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        # Dietary restrictions are stored as a list property, so we need to unwind them
+        query = """
+        MATCH (r:Restaurant)
+        WHERE r.dietary_restrictions IS NOT NULL AND size(r.dietary_restrictions) > 0
+        UNWIND r.dietary_restrictions AS restriction
+        RETURN DISTINCT restriction ORDER BY restriction
+        """
+        result = execute_neo4j_query(query)
+        data = [item['restriction'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all dietary restrictions: {str(e)}")
+        return []
+
+
+def get_all_dishes():
+    """Fetch all unique dishes from Restaurant node properties."""
+    cache_key = 'restaurant_dishes:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_data = redis.get(cache_key)
+        if cached_data:
+            logger.info(f"Cache hit for {cache_key}.")
+            return json.loads(cached_data)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+
+    try:
+        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        query = """
+        MATCH (r:Restaurant)
+        WHERE r.dishes IS NOT NULL AND size(r.dishes) > 0
+        UNWIND r.dishes AS dish
+        RETURN DISTINCT dish ORDER BY dish
+        """
+        result = execute_neo4j_query(query)
+        data = [item['dish'] for item in result]
+
+        if redis:
+            try:
+                redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
+                logger.info(f"Successfully cached {cache_key}.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching all dishes: {str(e)}")
+        return []
+
+
+def get_all_hotel_features():
+    """Fetch all unique features (amenities) for Hotels from Neo4j."""
+    cache_key = 'hotel_features:all'
+    redis = None
+    try:
+        redis = get_redis()
+        cached_features = redis.get(cache_key)
+        if cached_features:
+            logger.info("Cache hit for all hotel features.")
+            return json.loads(cached_features)
+    except Exception as e:
+        logger.warning(f"Redis cache GET failed for hotel features: {e}")
+
+    try:
+        logger.info("Cache miss for all hotel features. Fetching from Neo4j.")
+        query = "MATCH (:Hotel)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name"
+        result = execute_neo4j_query(query)
+        features = [item['name'] for item in result]
+
+        if redis:
+            try:
+                # Cache for 24 hours
+                redis.setex(cache_key, 86400, json.dumps(features))
+                logger.info("Successfully cached all hotel features.")
+            except Exception as e:
+                logger.warning(f"Redis cache SET failed for hotel features: {e}")
+
+        return features
+    except Exception as e:
+        logger.error(f"Error fetching all hotel features from Neo4j: {str(e)}")
+        return []
+
+
 def add_price_fields_to_neo4j_hotels():
     """
     One-time utility function to extract min_price and max_price from price_range 
@@ -478,3 +747,9 @@ def add_price_fields_to_neo4j_hotels():
     except Exception as e:
         print(f"Error during price field migration: {str(e)}")
         return {'error': str(e)}
+
+if __name__ == "__main__":
+    subtypes = get_all_subtypes()
+    print(subtypes)
+    subcategories = get_all_subcategories()
+    print(subcategories)
