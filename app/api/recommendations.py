@@ -78,16 +78,15 @@ def get_user_preferences(user_id: str) -> Dict:
         )
 
         favorite_place_ids = [row.place_id for row in favorites_result]
-        # print("favorite_place_ids")
-        # print(favorite_place_ids)
+
+
         # Get user's reviews with ratings
         reviews_result = db.session.execute(
             db.text("SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id"),
             {'user_id': user_id}
         )
         reviews = {row.place_id: row.rating for row in reviews_result}
-        # print("reviews")
-        # print(reviews)
+
         # Get place details from Neo4j for favorites and reviewed places
         all_place_ids = list(set(favorite_place_ids + list(reviews.keys())))
         
@@ -116,6 +115,7 @@ def get_user_preferences(user_id: str) -> Dict:
         places_data = execute_neo4j_query(neo4j_query, {'place_ids': all_place_ids})
         print("places_data")
         print(places_data)
+        print("--------------------------------")
         if not places_data:
             return {
                 'subcategories': {},
@@ -162,7 +162,6 @@ def get_user_preferences(user_id: str) -> Dict:
         if total_weight > 0:
             subcategory_scores = {k: v/total_weight for k, v in subcategory_scores.items()}
             subtype_scores = {k: v/total_weight for k, v in subtype_scores.items()}
-
         # Calculate average rating preference
         user_ratings = list(reviews.values())
         avg_rating_preference = np.mean(user_ratings) if user_ratings else 0.0
@@ -242,123 +241,123 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
         return 0.0, "Error in calculation"
 
 
-def get_collaborative_recommendations(user_id: str, place_type: str, limit: int) -> List[Dict]:
-    """Get recommendations based on collaborative filtering (users with similar preferences)."""
-    try:
-        # Find users with similar preferences (based on common favorites)
-        similar_users_query = """
-        SELECT f2.user_id, COUNT(*) as common_favorites
-        FROM user_favourites f1
-        JOIN user_favourites f2 ON f1.place_id = f2.place_id
-        WHERE f1.user_id = :user_id AND f2.user_id != :user_id
-        GROUP BY f2.user_id
-        HAVING COUNT(*) >= 2
-        ORDER BY common_favorites DESC
-        LIMIT 20
-        """
+# def get_collaborative_recommendations(user_id: str, place_type: str, limit: int) -> List[Dict]:
+#     """Get recommendations based on collaborative filtering (users with similar preferences)."""
+#     try:
+#         # Find users with similar preferences (based on common favorites)
+#         similar_users_query = """
+#         SELECT f2.user_id, COUNT(*) as common_favorites
+#         FROM user_favourites f1
+#         JOIN user_favourites f2 ON f1.place_id = f2.place_id
+#         WHERE f1.user_id = :user_id AND f2.user_id != :user_id
+#         GROUP BY f2.user_id
+#         HAVING COUNT(*) >= 2
+#         ORDER BY common_favorites DESC
+#         LIMIT 20
+#         """
         
-        similar_users_result = db.session.execute(
-            db.text(similar_users_query), {'user_id': user_id}
-        )
-        similar_user_ids = [row.user_id for row in similar_users_result]
+#         similar_users_result = db.session.execute(
+#             db.text(similar_users_query), {'user_id': user_id}
+#         )
+#         similar_user_ids = [row.user_id for row in similar_users_result]
 
-        if not similar_user_ids:
-            return []
+#         if not similar_user_ids:
+#             return []
 
-        # Get places liked by similar users (but not by current user)
-        user_places_query = """
-        SELECT place_id FROM user_favourites WHERE user_id = :user_id
-        UNION
-        SELECT place_id FROM user_reviews WHERE user_id = :user_id
-        """
-        user_places_result = db.session.execute(
-            db.text(user_places_query), {'user_id': user_id}
-        )
-        user_place_ids = [row.place_id for row in user_places_result]
+#         # Get places liked by similar users (but not by current user)
+#         user_places_query = """
+#         SELECT place_id FROM user_favourites WHERE user_id = :user_id
+#         UNION
+#         SELECT place_id FROM user_reviews WHERE user_id = :user_id
+#         """
+#         user_places_result = db.session.execute(
+#             db.text(user_places_query), {'user_id': user_id}
+#         )
+#         user_place_ids = [row.place_id for row in user_places_result]
 
-        # Get recommendations from similar users
-        placeholders = ', '.join([f':user_{i}' for i in range(len(similar_user_ids))])
-        user_params = {f'user_{i}': uid for i, uid in enumerate(similar_user_ids)}
+#         # Get recommendations from similar users
+#         placeholders = ', '.join([f':user_{i}' for i in range(len(similar_user_ids))])
+#         user_params = {f'user_{i}': uid for i, uid in enumerate(similar_user_ids)}
         
-        collaborative_query = f"""
-        SELECT place_id, COUNT(*) as recommendation_count
-        FROM (
-            SELECT place_id FROM user_favourites WHERE user_id IN ({placeholders})
-            UNION ALL
-            SELECT place_id FROM user_reviews WHERE user_id IN ({placeholders}) AND rating >= 4
-        ) AS recommended_places
-        GROUP BY place_id
-        ORDER BY recommendation_count DESC
-        LIMIT :limit
-        """
+#         collaborative_query = f"""
+#         SELECT place_id, COUNT(*) as recommendation_count
+#         FROM (
+#             SELECT place_id FROM user_favourites WHERE user_id IN ({placeholders})
+#             UNION ALL
+#             SELECT place_id FROM user_reviews WHERE user_id IN ({placeholders}) AND rating >= 4
+#         ) AS recommended_places
+#         GROUP BY place_id
+#         ORDER BY recommendation_count DESC
+#         LIMIT :limit
+#         """
         
-        params = {**user_params, 'limit': limit * 2}  # Get more to filter later
-        collab_result = db.session.execute(db.text(collaborative_query), params)
+#         params = {**user_params, 'limit': limit * 2}  # Get more to filter later
+#         collab_result = db.session.execute(db.text(collaborative_query), params)
         
-        recommended_place_ids = [
-            row.place_id for row in collab_result 
-            if row.place_id not in user_place_ids  # Exclude places user already knows
-        ]
+#         recommended_place_ids = [
+#             row.place_id for row in collab_result 
+#             if row.place_id not in user_place_ids  # Exclude places user already knows
+#         ]
 
-        if not recommended_place_ids:
-            return []
+#         if not recommended_place_ids:
+#             return []
 
-        # Get place details from Neo4j
-        type_filter = ""
-        if place_type != 'all':
-            if place_type == 'things-to-do':
-                type_filter = "AND p:ThingToDo"
-            elif place_type == 'hotels':
-                type_filter = "AND p:Hotel"
-            elif place_type == 'restaurants':
-                type_filter = "AND p:Restaurant"
+#         # Get place details from Neo4j
+#         type_filter = ""
+#         if place_type != 'all':
+#             if place_type == 'things-to-do':
+#                 type_filter = "AND p:ThingToDo"
+#             elif place_type == 'hotels':
+#                 type_filter = "AND p:Hotel"
+#             elif place_type == 'restaurants':
+#                 type_filter = "AND p:Restaurant"
 
-        neo4j_query = f"""
-        UNWIND $place_ids AS pid
-        MATCH (p) WHERE elementId(p) = pid {type_filter}
-        OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
-        OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
-        OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-        RETURN p AS place, 
-               elementId(p) AS element_id,
-               collect(DISTINCT sc.name) AS subcategories,
-               collect(DISTINCT st.name) AS subtypes,
-               c.name AS city_name,
-               c.created_at AS city_created_at,
-               c.postal_code AS city_postal_code
-        LIMIT $limit
-        """
+#         neo4j_query = f"""
+#         UNWIND $place_ids AS pid
+#         MATCH (p) WHERE elementId(p) = pid {type_filter}
+#         OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
+#         OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
+#         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
+#         RETURN p AS place, 
+#                elementId(p) AS element_id,
+#                collect(DISTINCT sc.name) AS subcategories,
+#                collect(DISTINCT st.name) AS subtypes,
+#                c.name AS city_name,
+#                c.created_at AS city_created_at,
+#                c.postal_code AS city_postal_code
+#         LIMIT $limit
+#         """
 
-        places_data = execute_neo4j_query(
-            neo4j_query, 
-            {'place_ids': recommended_place_ids[:limit], 'limit': limit}
-        )
+#         places_data = execute_neo4j_query(
+#             neo4j_query, 
+#             {'place_ids': recommended_place_ids[:limit], 'limit': limit}
+#         )
 
-        # Format results
-        recommendations = []
-        for place_data in places_data:
-            place = place_data['place']
-            place['element_id'] = place_data['element_id']
-            place['subcategories'] = [sc for sc in place_data['subcategories'] if sc]
-            place['subtypes'] = [st for st in place_data['subtypes'] if st]
-            place['similarity_score'] = 0.8  # High score for collaborative filtering
-            place['recommendation_reason'] = "Liked by users with similar taste"
+#         # Format results
+#         recommendations = []
+#         for place_data in places_data:
+#             place = place_data['place']
+#             place['element_id'] = place_data['element_id']
+#             place['subcategories'] = [sc for sc in place_data['subcategories'] if sc]
+#             place['subtypes'] = [st for st in place_data['subtypes'] if st]
+#             place['similarity_score'] = 0.8  # High score for collaborative filtering
+#             place['recommendation_reason'] = "Liked by users with similar taste"
             
-            # Add city information
-            if place_data.get('city_name'):
-                place['city'] = {
-                    'created_at': place_data.get('city_created_at', ''),
-                    'name': place_data['city_name'],
-                    'postal_code': place_data.get('city_postal_code', '')
-                }
+#             # Add city information
+#             if place_data.get('city_name'):
+#                 place['city'] = {
+#                     'created_at': place_data.get('city_created_at', ''),
+#                     'name': place_data['city_name'],
+#                     'postal_code': place_data.get('city_postal_code', '')
+#                 }
             
-            recommendations.append(place)
+#             recommendations.append(place)
 
-        return recommendations
+#         return recommendations
 
-    except Exception as e:
-        logger.error(f"Error getting collaborative recommendations: {str(e)}")
-        return []
+#     except Exception as e:
+#         logger.error(f"Error getting collaborative recommendations: {str(e)}")
+#         return []
 
 
 def get_content_based_recommendations(user_id: str, place_type: str, limit: int, user_prefs: Dict) -> List[Dict]:
@@ -426,6 +425,7 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
 
         # Calculate similarity scores
         scored_places = []
+
         for place_data in places_data:
             place = place_data['place']
             place['element_id'] = place_data['element_id']
@@ -435,7 +435,13 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
             similarity_score, reason = calculate_content_similarity(place, user_prefs)
             place['similarity_score'] = similarity_score
             place['recommendation_reason'] = reason
-            
+            # print("place")
+            # print(place)
+            # print("similarity_score")
+            # print(similarity_score)
+            # print("recommendation_reason")
+            # print(reason)
+            # print("--------------------------------")
             # Add city information
             if place_data.get('city_name'):
                 place['city'] = {
@@ -448,6 +454,9 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
 
         # Sort by similarity score and return top results
         scored_places.sort(key=lambda x: x['similarity_score'], reverse=True)
+        # print("scored_places")
+        # print(scored_places)
+        # print("--------------------------------")
         return scored_places[:limit]
 
     except Exception as e:
@@ -597,7 +606,9 @@ def get_recommendations():
 
         # Get user preferences
         user_prefs = get_user_preferences(user_id)
-        
+        # print("user_prefs")
+        # print(user_prefs)
+        # print("--------------------------------")
         # Get a larger set of recommendations first (for better pagination results)
         total_recommendations_to_fetch = max(100, size * 5)  # Fetch more for better filtering
         recommendations = []
@@ -605,11 +616,12 @@ def get_recommendations():
         # If user has enough interaction data, use hybrid approach
         if user_prefs['place_count'] >= 3:
             # Get collaborative filtering recommendations (30%)
-            collab_recs = get_collaborative_recommendations(user_id, place_type, max(10, total_recommendations_to_fetch // 3))
-            recommendations.extend(collab_recs)
+            # collab_recs = get_collaborative_recommendations(user_id, place_type, max(10, total_recommendations_to_fetch // 3))
+            # recommendations.extend(collab_recs)
 
             # Get content-based recommendations (50%)
-            content_limit = max(15, total_recommendations_to_fetch - len(collab_recs))
+            # content_limit = max(15, total_recommendations_to_fetch - len(collab_recs))
+            content_limit = max(15, total_recommendations_to_fetch)
             content_recs = get_content_based_recommendations(user_id, place_type, content_limit, user_prefs)
             recommendations.extend(content_recs)
 
@@ -620,8 +632,8 @@ def get_recommendations():
         if remaining_limit > 0:
             popular_recs = get_popular_recommendations(place_type, remaining_limit, current_place_ids)
             recommendations.extend(popular_recs)
-            print("popular_recs")
-            print(popular_recs)
+            # print("popular_recs")
+            # print(popular_recs)
 
 
         # Remove duplicates and maintain order
