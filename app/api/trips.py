@@ -2,6 +2,7 @@ import logging
 import math
 import time
 import json
+import os
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -14,6 +15,7 @@ from app.models import Trip, UserTrip, db
 from app.utils import execute_neo4j_query
 from app.utils import get_redis
 
+LIMIT_TRIP = int(os.environ.get('LIMIT_TRIP', 10))
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('trips', __name__, url_prefix='/trips')
 
@@ -97,7 +99,7 @@ def create_user_trip():
 @jwt_required()
 def get_user_trips():
     """Get all user trips for the authenticated user."""
-    start_time = time.time()
+    # start_time = time.time()
     user_id = get_jwt_identity()
 
     # Get search parameters
@@ -165,18 +167,15 @@ def get_user_trips():
                 }
             )
 
-        execution_time = time.time() - start_time
-        logger.info(
-            f'get_user_trips executed in {execution_time:.4f}s for user {user_id} - returned {len(result)} trips'
-        )
+        # execution_time = time.time() - start_time
+        # logger.info(f"get_user_trips executed in {execution_time:.4f}s for user {user_id} - returned {len(result)} trips")
+        # print(f"get_user_trips executed in {execution_time:.4f}s for user {user_id} - returned {len(result)} trips")
         return jsonify(result), 200
 
     except SQLAlchemyError as e:
         db.session.rollback()
-        execution_time = time.time() - start_time
-        logger.error(
-            f'get_user_trips failed in {execution_time:.4f}s for user {user_id}: {str(e)}'
-        )
+        # execution_time = time.time() - start_time
+        logger.error(f'get_user_trips failed for user {user_id}: {str(e)}')
         return jsonify({'error': 'Failed to fetch user trips'}), 500
 
 
@@ -576,25 +575,21 @@ def reorder_trip_places(trip_id):
 
 def get_place_details_from_neo4j(place_id):
     """Get place details from Neo4j regardless of place type with caching."""
-    start_time = time.time()
+    # start_time = time.time()
 
     # Try to get from cache first
     cache_key = f'place_details:{place_id}'
     try:
         cached_data = get_redis().get(cache_key)
         if cached_data:
-            execution_time = time.time() - start_time
-            logger.info(
-                f'get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache hit)'
-            )
+            # execution_time = time.time() - start_time
+            # # logger.info(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache hit)")
             return json.loads(cached_data)
     except Exception as e:
         logger.warning(f'Failed to get cached place details: {e}')
 
     # Cache miss - fetch from Neo4j
-    logger.debug(
-        f'Place details cache miss for place {place_id} - fetching from Neo4j'
-    )
+    # logger.debug(f"Place details cache miss for place {place_id} - fetching from Neo4j")
 
     # First, try to find the place by elementId
     result = execute_neo4j_query(
@@ -608,9 +603,9 @@ def get_place_details_from_neo4j(place_id):
     )
 
     if not result:
-        execution_time = time.time() - start_time
+        # execution_time = time.time() - start_time
         logger.warning(
-            f'get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (not found)'
+            f'get_place_details_from_neo4j: place {place_id} not found'
         )
         return None
 
@@ -711,14 +706,13 @@ def get_place_details_from_neo4j(place_id):
     # Cache the result for 1 hour (place details don't change frequently)
     try:
         get_redis().setex(cache_key, 3600, json.dumps(filtered_data))
-        logger.debug(f'Place details cached for place {place_id}')
+        # logger.debug(f"Place details cached for place {place_id}")
     except Exception as e:
         logger.warning(f'Failed to cache place details: {e}')
 
-    execution_time = time.time() - start_time
-    logger.info(
-        f'get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache miss)'
-    )
+    # execution_time = time.time() - start_time
+    # logger.info(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache miss)")
+    # print(f"get_place_details_from_neo4j executed in {execution_time:.4f}s for place {place_id} (cache miss)")
     return filtered_data
 
 
@@ -792,7 +786,70 @@ def calculate_distance_matrix(places):
     return matrix
 
 
-def solve_tsp(distance_matrix, time_limit_seconds=10):
+def solve_tsp_dp(distance_matrix):
+    """
+    Solves the Traveling Salesperson Problem (Open TSP variant) using dynamic programming.
+    This finds the shortest path visiting all nodes exactly once, starting from node 0,
+    without returning to the start.
+
+    Args:
+        distance_matrix: A 2D list representing the distances between nodes.
+
+    Returns:
+        A list of node indices representing the optimized route, or None if no solution.
+    """
+    n = len(distance_matrix)
+    if n == 0:
+        return []
+    if n == 1:
+        return [0]
+
+    # dp[mask][i]: cost of path from node 0 to i, visiting nodes in mask
+    dp = [[float('inf')] * n for _ in range(1 << n)]
+    parent = [[-1] * n for _ in range(1 << n)]
+
+    dp[1][0] = 0  # Base case: path from 0 to 0 with mask {0} has cost 0
+
+    for mask in range(1, 1 << n):
+        for i in range(n):
+            if (mask >> i) & 1:  # If node i is in the current set
+                # Find predecessor j
+                for j in range(n):
+                    if i != j and (mask >> j) & 1:
+                        prev_mask = mask ^ (1 << i)  # Set without node i
+                        if dp[prev_mask][j] != float('inf'):
+                            new_cost = dp[prev_mask][j] + distance_matrix[j][i]
+                            if new_cost < dp[mask][i]:
+                                dp[mask][i] = new_cost
+                                parent[mask][i] = j
+
+    # Find the end of the shortest path for Open TSP
+    final_mask = (1 << n) - 1
+    last_node = -1
+    min_path_cost = float('inf')
+
+    for i in range(n):
+        if dp[final_mask][i] < min_path_cost:
+            min_path_cost = dp[final_mask][i]
+            last_node = i
+
+    if last_node == -1:
+        return None  # No path found
+
+    # Reconstruct path by backtracking
+    path = []
+    current_mask = final_mask
+    current_node = last_node
+    while current_node != -1:
+        path.append(current_node)
+        prev_node = parent[current_mask][current_node]
+        current_mask ^= 1 << current_node
+        current_node = prev_node
+
+    return path[::-1]  # Return in correct (forward) order
+
+
+def solve_tsp_or_tools(distance_matrix, time_limit_seconds=10):
     """Solve TSP using Google OR-Tools."""
     manager = pywrapcp.RoutingIndexManager(len(distance_matrix), 1, 0)
     routing = pywrapcp.RoutingModel(manager)
@@ -800,6 +857,7 @@ def solve_tsp(distance_matrix, time_limit_seconds=10):
     def distance_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
+        # print(from_node, to_node, distance_matrix[from_node][to_node])
         return distance_matrix[from_node][to_node]
 
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
@@ -898,27 +956,40 @@ def optimize_trip(trip_id):
             return jsonify({'error': 'No valid places found in trip'}), 400
 
         # Calculate distance matrix
-        logger.info(
-            f'Calculating distance matrix for {len(place_details)} places...'
-        )
-        matrix_start_time = time.time()
+        # logger.info(f'Calculating distance matrix for {len(place_details)} places...')
+        # matrix_start_time = time.time()
         distance_matrix = calculate_distance_matrix(place_details)
-        matrix_time = time.time() - matrix_start_time
-        logger.info(
-            f'Distance matrix calculation completed in {matrix_time:.3f} seconds'
-        )
+        # matrix_time = time.time() - matrix_start_time
+        # logger.info(f'Distance matrix calculation completed in {matrix_time:.3f} seconds')
 
-        # Solve TSP with timing
-        logger.info(
-            f'Starting TSP optimization for trip {trip_id} with {len(place_details)} places...'
-        )
-        tsp_start_time = time.time()
-        optimized_route = solve_tsp(distance_matrix)
-        tsp_time = time.time() - tsp_start_time
+        # Solve TSP with timing and solver selection
+        num_places = len(place_details)
+        # logger.info(f"Starting TSP optimization for trip {trip_id} with {num_places} places. DP limit is {LIMIT_TRIP}")
+
+        tsp_solver_used = ''
+        optimized_route = None
+        # tsp_start_time = time.time()
+
+        # print('limit', LIMIT_TRIP)
+        # print('num_places', num_places)
+        if num_places < LIMIT_TRIP:
+            # logger.info("Number of places is within limit, using Dynamic Programming.")
+            tsp_solver_used = 'Dynamic Programming'
+            optimized_route = solve_tsp_dp(distance_matrix)
+        else:
+            # logger.info("Number of places exceeds limit, using Google OR-Tools.")
+            tsp_solver_used = 'Google OR-Tools'
+            optimized_route = solve_tsp_or_tools(distance_matrix)
+
+        # tsp_time = time.time() - tsp_start_time
+
+        # print(f"TSP Route optimization completed in {tsp_time:.3f} seconds for {num_places} places using {tsp_solver_used}")
+        # logger.info(f'TSP optimization ({tsp_solver_used}) completed in {tsp_time:.3f} seconds')
 
         if not optimized_route:
+            # logger.error(f'TSP optimization ({tsp_solver_used}) failed after {tsp_time:.3f} seconds')
             logger.error(
-                f'TSP optimization failed after {tsp_time:.3f} seconds'
+                f'TSP optimization ({tsp_solver_used}) failed for trip {trip_id}'
             )
             return jsonify({'error': 'Failed to optimize route'}), 500
 
@@ -957,13 +1028,9 @@ def optimize_trip(trip_id):
         # Sort places by order to ensure correct sequence
         optimized_places.sort(key=lambda x: x['order'])
 
-        total_optimization_time = matrix_time + tsp_time
-        logger.info(
-            f'Trip {trip_id} optimization completed successfully in {total_optimization_time:.3f} seconds total'
-        )
-        print(
-            f'Total optimization time: {total_optimization_time:.3f} seconds (Matrix: {matrix_time:.3f}s, TSP: {tsp_time:.3f}s)'
-        )
+        # total_optimization_time = matrix_time + tsp_time
+        # logger.info(f'Trip {trip_id} optimization completed successfully in {total_optimization_time:.3f} seconds total')
+        # print(f"Total optimization time: {total_optimization_time:.3f} seconds (Matrix: {matrix_time:.3f}s, TSP: {tsp_time:.3f}s)")
 
         return jsonify(
             {
@@ -975,11 +1042,12 @@ def optimize_trip(trip_id):
                 'totalDistanceKm': round(
                     total_distance / 1000, 2
                 ),  # in kilometers
-                'optimizationTime': {
-                    'total': round(total_optimization_time, 3),
-                    'matrixCalculation': round(matrix_time, 3),
-                    'tspSolving': round(tsp_time, 3),
-                },
+                # 'optimizationTime': {
+                #     'total': round(total_optimization_time, 3),
+                #     'matrixCalculation': round(matrix_time, 3),
+                #     'tspSolving': round(tsp_time, 3)
+                # },
+                'optimizationMethod': tsp_solver_used,
                 'places': TripPlaceSchema(many=True).dump(optimized_places),
             }
         ), 200
