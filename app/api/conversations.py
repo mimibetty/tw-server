@@ -185,7 +185,7 @@ tools = types.Tool(
     ]
 )
 config = types.GenerateContentConfig(
-    system_instruction=SYSTEM_INSTRUCTION, tools=[tools]
+    system_instruction=SYSTEM_INSTRUCTION, tools=[tools], temperature=0.6
 )
 
 
