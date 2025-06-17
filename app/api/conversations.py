@@ -135,7 +135,7 @@ def get_attraction_list():
             elementId(r) AS id,
             r.name AS name
         ORDER BY r.raw_ranking DESC
-        LIMIT 50
+        LIMIT 150
         """,
     )
     if not result:
