@@ -4,7 +4,13 @@ from datetime import datetime, date
 from flask_sqlalchemy import SQLAlchemy
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, backref
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    relationship,
+    backref,
+)
 from werkzeug.security import generate_password_hash
 
 from app.environments import TIMEZONE
@@ -59,9 +65,9 @@ class UserFavourite(BaseModel):
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', 
+        'User',
         backref=backref('user_favourites', cascade='all, delete-orphan'),
-        foreign_keys=[user_id]
+        foreign_keys=[user_id],
     )
 
     def __init__(self, user_id: uuid.UUID, place_id: str) -> None:
@@ -82,9 +88,9 @@ class UserReview(BaseModel):
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', 
+        'User',
         backref=backref('user_reviews', cascade='all, delete-orphan'),
-        foreign_keys=[user_id]
+        foreign_keys=[user_id],
     )
 
     # Constraints
@@ -104,13 +110,15 @@ class UserTrip(BaseModel):
     )
     name: Mapped[str] = mapped_column(nullable=False)
     is_optimized: Mapped[bool] = mapped_column(default=False)
-    trip_status: Mapped[bool] = mapped_column(default=False)  # False = "Upcoming", True = "Done"
+    trip_status: Mapped[bool] = mapped_column(
+        default=False
+    )  # False = "Upcoming", True = "Done"
 
     # Relationships
     user: Mapped[User] = relationship(
-        'User', 
+        'User',
         backref=backref('user_trips', cascade='all, delete-orphan'),
-        foreign_keys=[user_id]
+        foreign_keys=[user_id],
     )
 
 
@@ -125,9 +133,9 @@ class Trip(BaseModel):
 
     # Relationships
     user_trip: Mapped[UserTrip] = relationship(
-        'UserTrip', 
+        'UserTrip',
         backref=backref('trips', cascade='all, delete-orphan'),
-        foreign_keys=[trip_id]
+        foreign_keys=[trip_id],
     )
 
 

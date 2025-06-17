@@ -9,37 +9,39 @@ if project_root not in sys.path:
 # Now that the path is correctly set, we can import the utility functions
 from app.utils import get_all_subtypes, get_all_subcategories
 
+
 def main():
     """
     Main function to test fetching all subtypes and subcategories.
     """
-    print("--- Testing get_all_subtypes() ---")
+    print('--- Testing get_all_subtypes() ---')
     try:
         subtypes = get_all_subtypes()
         if subtypes:
-            print(f"Successfully fetched {len(subtypes)} subtypes.")
+            print(f'Successfully fetched {len(subtypes)} subtypes.')
             # Print a sample of the results
-            print("Sample:", subtypes)
+            print('Sample:', subtypes)
         else:
-            print("No subtypes were found.")
-        
+            print('No subtypes were found.')
+
     except Exception as e:
-        print(f"An error occurred while fetching subtypes: {e}")
+        print(f'An error occurred while fetching subtypes: {e}')
 
-    print("\\n" + "="*50 + "\\n")
+    print('\\n' + '=' * 50 + '\\n')
 
-    print("--- Testing get_all_subcategories() ---")
+    print('--- Testing get_all_subcategories() ---')
     try:
         subcategories = get_all_subcategories()
         if subcategories:
-            print(f"Successfully fetched {len(subcategories)} subcategories.")
+            print(f'Successfully fetched {len(subcategories)} subcategories.')
             # Print a sample of the results
-            print("Sample:", subcategories)
+            print('Sample:', subcategories)
         else:
-            print("No subcategories were found.")
+            print('No subcategories were found.')
 
     except Exception as e:
-        print(f"An error occurred while fetching subcategories: {e}")
+        print(f'An error occurred while fetching subcategories: {e}')
 
-if __name__ == "__main__":
-    main() 
+
+if __name__ == '__main__':
+    main()

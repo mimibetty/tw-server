@@ -23,7 +23,7 @@ blueprint = Blueprint('hotels', __name__, url_prefix='/hotels')
 def extract_price_range(price_range_str):
     """
     Extract min_price and max_price from price_range string.
-    
+
     Examples:
     "$1 - $25" -> (1, 25)
     "$26 - $50" -> (26, 50)
@@ -31,25 +31,25 @@ def extract_price_range(price_range_str):
     """
     if not price_range_str:
         return None, None
-    
+
     import re
-    
+
     # Remove extra spaces and convert to lower
     price_str = price_range_str.strip()
-    
+
     # Handle "$101+" format
     if '+' in price_str:
         match = re.search(r'\$(\d+)\+', price_str)
         if match:
             return int(match.group(1)), None
-    
+
     # Handle "$1 - $25" format
     matches = re.findall(r'\$(\d+)', price_str)
     if len(matches) >= 2:
         return int(matches[0]), int(matches[1])
     elif len(matches) == 1:
         return int(matches[0]), int(matches[0])
-    
+
     return None, None
 
 
@@ -331,19 +331,21 @@ def get_hotels():
 
     # Get search parameter
     search = request.args.get('search', default='', type=str)
-    
+
     # Get filter parameters - Updated to use single price parameter
     price = request.args.get('price', type=int)
-    hotel_class = request.args.get('hotel_class', type=str)  # Changed from float to str
+    hotel_class = request.args.get(
+        'hotel_class', type=str
+    )  # Changed from float to str
     rating = request.args.get('rating', type=float)
     features = request.args.get('features', type=str)
-    
+
     # Normalize hotel_class format to match database (e.g., "3" -> "3.0", "5" -> "5.0")
     if hotel_class is not None:
         try:
             # Convert to float and back to string to ensure .0 format
             hotel_class_float = float(hotel_class)
-            hotel_class = f"{hotel_class_float:.1f}"
+            hotel_class = f'{hotel_class_float:.1f}'
         except ValueError:
             # If conversion fails, keep original value
             pass
@@ -357,12 +359,19 @@ def get_hotels():
     # Determine operation mode: search vs filter
     is_search_mode = bool(search.strip())
     is_filter_mode = any(
-        [price is not None, hotel_class is not None, rating is not None, features]
+        [
+            price is not None,
+            hotel_class is not None,
+            rating is not None,
+            features,
+        ]
     )
-    
+
     if is_search_mode and is_filter_mode:
-        return {'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'}, 400
-    
+        return {
+            'error': 'Cannot use search and filter parameters simultaneously. Please use either search OR filter parameters.'
+        }, 400
+
     if not is_search_mode and not is_filter_mode:
         # Default behavior: return all hotels
         return _get_all_hotels(page, size, offset, user_id)
@@ -371,7 +380,14 @@ def get_hotels():
     else:
         feature_list = features.split(',') if features else []
         return _filter_hotels(
-            price, hotel_class, rating, feature_list, page, size, offset, user_id
+            price,
+            hotel_class,
+            rating,
+            feature_list,
+            page,
+            size,
+            offset,
+            user_id,
         )
 
 
@@ -407,13 +423,13 @@ def _get_all_hotels(page, size, offset, user_id):
 
     # Create Cypher query parameters
     query_params = {'offset': offset, 'size': size}
-    
+
     # Get the total count of all hotels
     count_query = """
     MATCH (h:Hotel)
     RETURN count(h) AS total_count
     """
-    
+
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
@@ -429,7 +445,7 @@ def _get_all_hotels(page, size, offset, user_id):
     SKIP $offset
     LIMIT $size
     """
-    
+
     result = execute_neo4j_query(hotels_query, query_params)
 
     # Process results - now includes price fields
@@ -485,14 +501,14 @@ def _search_hotels(search, page, size, offset, user_id):
 
     # Create Cypher query parameters
     query_params = {'offset': offset, 'size': size, 'search': search}
-    
+
     # Get the total count of hotels matching the search criteria
     count_query = """
     MATCH (h:Hotel)
     WHERE toLower(h.name) CONTAINS toLower($search)
     RETURN count(h) AS total_count
     """
-    
+
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
 
@@ -509,7 +525,7 @@ def _search_hotels(search, page, size, offset, user_id):
     SKIP $offset
     LIMIT $size
     """
-    
+
     result = execute_neo4j_query(hotels_query, query_params)
 
     # Process results - now includes price fields
@@ -540,7 +556,7 @@ def _filter_hotels(
     Filter hotels based on criteria using pure database-level filtering.
     All filters (price, rating, hotel_class) are applied directly in Neo4j for optimal performance.
     """
-    
+
     # Build cache key based on filter parameters
     cache_parts = [f'page={page}', f'size={size}', 'filter']
     if price is not None:
@@ -550,10 +566,10 @@ def _filter_hotels(
     if rating is not None:
         cache_parts.append(f'rating={rating}')
     if features:
-        cache_parts.append(f"features={','.join(sorted(features))}")
-    
+        cache_parts.append(f'features={",".join(sorted(features))}')
+
     cache_key = f'hotels:{":".join(cache_parts)}'
-    
+
     # Check Redis cache first
     redis = get_redis()
     try:
@@ -583,7 +599,7 @@ def _filter_hotels(
 
     # Build unified query structure for both count and main queries
     query_params = {'offset': offset, 'size': size}
-    
+
     # Determine if we need subquery approach to avoid Neo4j optimization bug
     # Use subquery if we have any filtering (price, hotel_class, or rating)
     needs_subquery = (
@@ -592,10 +608,10 @@ def _filter_hotels(
         or rating is not None
         or features
     )
-    
+
     if needs_subquery:
         # Use subquery approach to avoid Neo4j optimization bug with ORDER BY + filtering
-        
+
         # Build initial filter conditions
         filter_conditions = []
         if hotel_class is not None:
@@ -606,42 +622,44 @@ def _filter_hotels(
             """
             query_params['hotel_class'] = hotel_class
         else:
-            base_match = "MATCH (h:Hotel)"
-        
+            base_match = 'MATCH (h:Hotel)'
+
         # Add other filter conditions
         additional_filters = []
         if price is not None:
-            additional_filters.append("h.min_price <= $price AND $price <= h.max_price")
+            additional_filters.append(
+                'h.min_price <= $price AND $price <= h.max_price'
+            )
             query_params['price'] = price
-        
+
         if rating is not None:
-            additional_filters.append("h.rating >= $rating")
+            additional_filters.append('h.rating >= $rating')
             query_params['rating'] = rating
-        
+
         if features:
             additional_filters.append(
                 'ALL(f_name IN $features WHERE (h)-[:HAS_FEATURE]->(:Feature {name: f_name}))'
             )
             query_params['features'] = features
-        
+
         # Build WHERE clause for additional filters
         if additional_filters:
             if hotel_class is not None:
                 # Already have WHERE clause from hotel_class, use AND
-                additional_where = f"AND {' AND '.join(additional_filters)}"
+                additional_where = f'AND {" AND ".join(additional_filters)}'
             else:
                 # No previous WHERE clause, start with WHERE
-                additional_where = f"WHERE {' AND '.join(additional_filters)}"
+                additional_where = f'WHERE {" AND ".join(additional_filters)}'
         else:
-            additional_where = ""
-        
+            additional_where = ''
+
         # Count query using the same structure
         count_query = f"""
         {base_match}
         {additional_where}
         RETURN count(h) AS total_count
         """
-        
+
         # Main query using subquery pattern to avoid optimization bug
         main_query = f"""
         {base_match}
@@ -662,7 +680,7 @@ def _filter_hotels(
         MATCH (h:Hotel)
         RETURN count(h) AS total_count
         """
-        
+
         main_query = """
         MATCH (h:Hotel)
         OPTIONAL MATCH (h)-[:HAS_PRICE_LEVEL]->(pl:PriceLevel)
@@ -674,7 +692,7 @@ def _filter_hotels(
         SKIP $offset
         LIMIT $size
         """
-    
+
     # Execute count query
     total_count_result = execute_neo4j_query(count_query, query_params)
     total_count = total_count_result[0]['total_count']
@@ -691,14 +709,15 @@ def _filter_hotels(
         offset=offset,
         total_count=total_count,
     )
-    
+
     # Cache the result for 6 hours
     try:
         redis.set(cache_key, json.dumps(response), ex=21600)
     except Exception as e:
         logger.warning('Redis cache set failed: %s', e)
-    
+
     return response, 200
+
 
 def _process_hotel_results(result, user_id):
     """Process hotel query results and add element_id, price_levels, city, and price fields."""
@@ -707,7 +726,9 @@ def _process_hotel_results(result, user_id):
         record['h']['element_id'] = record['element_id']
         record['h']['price_levels'] = record['price_levels']
         record['h']['city'] = record['city']
-        record['h']['hotel_class'] = record.get('hotel_class')  # Use .get for safety
+        record['h']['hotel_class'] = record.get(
+            'hotel_class'
+        )  # Use .get for safety
         record['h']['features'] = record.get('features', [])  # Add features
         del record['element_id']
         del record['price_levels']
@@ -718,7 +739,7 @@ def _process_hotel_results(result, user_id):
             del record['features']
 
     hotels_data = [record['h'] for record in result]
-    
+
     # Add min_price and max_price fields to all hotels
     hotels_data = add_price_fields_to_hotels(hotels_data)
 
@@ -739,13 +760,12 @@ def _process_hotel_results(result, user_id):
     else:
         for hotel in hotels_data:
             hotel['is_favorite'] = False
-    
+
     return hotels_data
 
 
 @blueprint.get('/<hotel_id>')
 @blueprint.get('/<hotel_id>/')
-
 @jwt_required(optional=True)
 def get_hotel(hotel_id):
     schema = HotelSchema()
@@ -776,13 +796,13 @@ def get_hotel(hotel_id):
                 hotel['is_favorite'] = bool(favourite)
             else:
                 hotel['is_favorite'] = False
-            
+
             # Add min_price and max_price fields from price_range
             price_range = hotel.get('price_range')
             min_price, max_price = extract_price_range(price_range)
             hotel['min_price'] = min_price
             hotel['max_price'] = max_price
-            
+
             return schema.dump(hotel), 200
     except Exception as e:
         logger.warning('Redis is not available to get data: %s', e)
@@ -850,7 +870,7 @@ def get_hotel(hotel_id):
 def delete_hotel(hotel_id):
     """
     Delete a hotel and all related data.
-    
+
     This endpoint will:
     - Remove the hotel from Neo4j database
     - Delete all user reviews of this hotel
@@ -866,24 +886,24 @@ def delete_hotel(hotel_id):
             WHERE elementId(h) = $hotel_id
             RETURN h.name as name, h.type as type
             """,
-            {'hotel_id': hotel_id}
+            {'hotel_id': hotel_id},
         )
-        
+
         if not result:
             return {'error': 'Hotel not found'}, 404
-        
+
         hotel_name = result[0]['name']
-        
+
         # Use the comprehensive deletion utility
         deletion_summary = delete_place_and_related_data(hotel_id)
-        
+
         # Check if deletion was successful
         if not deletion_summary['place_deleted']:
             return {
                 'error': 'Failed to delete hotel',
-                'details': deletion_summary['errors']
+                'details': deletion_summary['errors'],
             }, 500
-        
+
         # Prepare success response
         response = {
             'message': f'Hotel "{hotel_name}" has been successfully deleted',
@@ -892,19 +912,19 @@ def delete_hotel(hotel_id):
                 'reviews_deleted': deletion_summary['reviews_deleted'],
                 'favorites_removed': deletion_summary['favorites_deleted'],
                 'trips_updated': deletion_summary['trips_updated'],
-                'cache_cleared': deletion_summary['cache_cleared']
-            }
+                'cache_cleared': deletion_summary['cache_cleared'],
+            },
         }
-        
+
         # Include any non-critical errors as warnings
         if deletion_summary['errors']:
             response['warnings'] = deletion_summary['errors']
-        
+
         return response, 200
-        
+
     except Exception as e:
-        logger.error(f"Error deleting hotel {hotel_id}: {str(e)}")
+        logger.error(f'Error deleting hotel {hotel_id}: {str(e)}')
         return {
             'error': 'An unexpected error occurred while deleting the hotel',
-            'details': str(e)
+            'details': str(e),
         }, 500

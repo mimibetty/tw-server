@@ -141,22 +141,32 @@ def get_me():
 
     # Get user data
     response = MeSchema().dump(user)
-    
+
     # Add user statistics
     # Get user statistics
-    favorites_count = db.session.query(UserFavourite).filter_by(user_id=user_id).count()
-    reviews_count = db.session.query(UserReview).filter_by(user_id=user_id).count()
+    favorites_count = (
+        db.session.query(UserFavourite).filter_by(user_id=user_id).count()
+    )
+    reviews_count = (
+        db.session.query(UserReview).filter_by(user_id=user_id).count()
+    )
     trips_count = db.session.query(UserTrip).filter_by(user_id=user_id).count()
-    
+
     # Get average rating given by user
-    avg_rating_result = db.session.query(func.avg(UserReview.rating)).filter_by(user_id=user_id).scalar()
-    avg_rating = round(float(avg_rating_result), 1) if avg_rating_result else 0.0
-    
+    avg_rating_result = (
+        db.session.query(func.avg(UserReview.rating))
+        .filter_by(user_id=user_id)
+        .scalar()
+    )
+    avg_rating = (
+        round(float(avg_rating_result), 1) if avg_rating_result else 0.0
+    )
+
     response['statistics'] = {
         'favorites_count': favorites_count,
         'reviews_count': reviews_count,
         'trips_count': trips_count,
-        'average_rating_given': avg_rating
+        'average_rating_given': avg_rating,
     }
 
     # Cache the user data in Redis in 6 hours

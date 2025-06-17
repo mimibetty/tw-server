@@ -16,26 +16,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
 from app.utils import add_price_fields_to_neo4j_hotels
 
+
 def main():
-    print("Starting hotel price fields migration...")
-    print("This will add min_price and max_price properties to Hotel nodes in Neo4j.")
-    
+    print('Starting hotel price fields migration...')
+    print(
+        'This will add min_price and max_price properties to Hotel nodes in Neo4j.'
+    )
+
     # Confirm before proceeding
-    confirm = input("Do you want to proceed? (y/N): ").strip().lower()
+    confirm = input('Do you want to proceed? (y/N): ').strip().lower()
     if confirm != 'y':
-        print("Migration cancelled.")
+        print('Migration cancelled.')
         return
-    
+
     try:
         result = add_price_fields_to_neo4j_hotels()
         if 'error' in result:
-            print(f"Migration failed: {result['error']}")
+            print(f'Migration failed: {result["error"]}')
         else:
-            print(f"Migration completed successfully!")
-            print(f"Hotels updated: {result['updated']}")
-            print(f"Errors: {result['errors']}")
+            print(f'Migration completed successfully!')
+            print(f'Hotels updated: {result["updated"]}')
+            print(f'Errors: {result["errors"]}')
     except Exception as e:
-        print(f"Migration failed with exception: {str(e)}")
+        print(f'Migration failed with exception: {str(e)}')
 
-if __name__ == "__main__":
-    main() 
+
+if __name__ == '__main__':
+    main()

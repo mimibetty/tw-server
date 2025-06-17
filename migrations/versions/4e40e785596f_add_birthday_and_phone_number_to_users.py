@@ -5,6 +5,7 @@ Revises: e2f6a6263d46
 Create Date: 2025-06-02 14:36:31.439012
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -19,9 +20,11 @@ depends_on = None
 def upgrade():
     # Add birthday column (nullable DATE field)
     op.add_column('users', sa.Column('birthday', sa.Date(), nullable=True))
-    
+
     # Add phone_number column (nullable VARCHAR field)
-    op.add_column('users', sa.Column('phone_number', sa.String(length=20), nullable=True))
+    op.add_column(
+        'users', sa.Column('phone_number', sa.String(length=20), nullable=True)
+    )
 
 
 def downgrade():

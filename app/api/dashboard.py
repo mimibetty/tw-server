@@ -20,7 +20,9 @@ class DashboardStatsSchema(ma.Schema):
     longitude = fields.Float(dump_only=True, allow_none=True)
     phone = fields.String(dump_only=True, allow_none=True)
     rating = fields.Float(dump_only=True, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), dump_only=True, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), dump_only=True, default=list
+    )
     raw_ranking = fields.Float(dump_only=True, allow_none=True)
     street = fields.String(dump_only=True, allow_none=True)
     website = fields.String(dump_only=True, allow_none=True)
@@ -39,7 +41,9 @@ class DashboardRankingSchema(ma.Schema):
     longitude = fields.Float(dump_only=True, allow_none=True)
     phone = fields.String(dump_only=True, allow_none=True)
     rating = fields.Float(dump_only=True, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), dump_only=True, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), dump_only=True, default=list
+    )
     raw_ranking = fields.Float(dump_only=True, allow_none=True)
     street = fields.String(dump_only=True, allow_none=True)
     website = fields.String(dump_only=True, allow_none=True)
@@ -52,15 +56,16 @@ class DashboardQuerySchema(ma.Schema):
     place_type = fields.String(
         required=False,
         missing='all',
-        validate=lambda x: x in ['all', 'hotels', 'restaurants', 'things-to-do']
+        validate=lambda x: x
+        in ['all', 'hotels', 'restaurants', 'things-to-do'],
     )
     order = fields.String(
-        required=False,
-        missing='desc',
-        validate=lambda x: x in ['asc', 'desc']
+        required=False, missing='desc', validate=lambda x: x in ['asc', 'desc']
     )
     page = fields.Integer(required=False, missing=1, validate=lambda x: x >= 1)
-    size = fields.Integer(required=False, missing=10, validate=lambda x: 1 <= x <= 100)
+    size = fields.Integer(
+        required=False, missing=10, validate=lambda x: 1 <= x <= 100
+    )
 
 
 @blueprint.get('/statistics/places')
@@ -73,7 +78,9 @@ def get_places_statistics():
         try:
             args = schema.load(request.args)
         except ValidationError as e:
-            return jsonify({'error': 'Invalid parameters', 'details': e.messages}), 400
+            return jsonify(
+                {'error': 'Invalid parameters', 'details': e.messages}
+            ), 400
 
         place_type = args['place_type']
         order = args['order']
@@ -92,26 +99,30 @@ def get_places_statistics():
         """.format(order='DESC' if order == 'desc' else 'ASC')
 
         trip_stats_result = db.session.execute(db.text(trip_stats_query))
-        place_stats = {row.place_id: row.trip_count for row in trip_stats_result}
+        place_stats = {
+            row.place_id: row.trip_count for row in trip_stats_result
+        }
 
         if not place_stats:
             # Return empty result with proper pagination structure
-            return jsonify({
-                'data': [],
-                'paging': create_paging_metadata(0, page, 1, size, 0)
-            }), 200
+            return jsonify(
+                {
+                    'data': [],
+                    'paging': create_paging_metadata(0, page, 1, size, 0),
+                }
+            ), 200
 
         # Get place details from Neo4j
         place_ids = list(place_stats.keys())
-        
+
         # Build type filter for Neo4j query
-        type_filter = ""
+        type_filter = ''
         if place_type == 'things-to-do':
-            type_filter = "AND p:ThingToDo"
+            type_filter = 'AND p:ThingToDo'
         elif place_type == 'hotels':
-            type_filter = "AND p:Hotel"
+            type_filter = 'AND p:Hotel'
         elif place_type == 'restaurants':
-            type_filter = "AND p:Restaurant"
+            type_filter = 'AND p:Restaurant'
         # For 'all', no additional filter needed
 
         neo4j_query = f"""
@@ -131,46 +142,51 @@ def get_places_statistics():
                c.postal_code AS city_postal_code
         """
 
-        places_data = execute_neo4j_query(neo4j_query, {'place_ids': place_ids})
+        places_data = execute_neo4j_query(
+            neo4j_query, {'place_ids': place_ids}
+        )
 
         if not places_data:
-            return jsonify({
-                'data': [],
-                'paging': create_paging_metadata(0, page, 1, size, 0)
-            }), 200
+            return jsonify(
+                {
+                    'data': [],
+                    'paging': create_paging_metadata(0, page, 1, size, 0),
+                }
+            ), 200
 
         # Combine place data with trip statistics
         places_with_stats = []
         for place_data in places_data:
             place = place_data['place']
             element_id = place_data['element_id']
-            
+
             # Add trip count from statistics
             place['trip_count'] = place_stats.get(element_id, 0)
             place['element_id'] = element_id
             place['type'] = place_data['type']
-            
-            
+
             # Add city information
             if place_data.get('city_name'):
                 place['city'] = {
                     'created_at': place_data.get('city_created_at', ''),
                     'name': place_data['city_name'],
-                    'postal_code': place_data.get('city_postal_code', '')
+                    'postal_code': place_data.get('city_postal_code', ''),
                 }
-            
+
             places_with_stats.append(place)
 
         # Sort by trip count according to order parameter
         reverse_order = order == 'desc'
-        places_with_stats.sort(key=lambda x: x['trip_count'], reverse=reverse_order)
+        places_with_stats.sort(
+            key=lambda x: x['trip_count'], reverse=reverse_order
+        )
 
         # Calculate total count for pagination
         total_count = len(places_with_stats)
         page_count = (total_count + size - 1) // size if total_count > 0 else 1
 
         # Apply pagination
-        paginated_places = places_with_stats[offset:offset + size]
+        paginated_places = places_with_stats[offset : offset + size]
 
         # Format city data properly
         for place in paginated_places:
@@ -181,14 +197,14 @@ def get_places_statistics():
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
                 elif isinstance(city_data, dict):
                     # Already a dict, ensure it has required fields
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
 
         # Serialize data
@@ -196,17 +212,16 @@ def get_places_statistics():
         serialized_data = schema.dump(paginated_places)
 
         # Create paging info
-        paging = create_paging_metadata(offset, page, page_count, size, total_count)
+        paging = create_paging_metadata(
+            offset, page, page_count, size, total_count
+        )
 
-        result = {
-            'data': serialized_data,
-            'paging': paging
-        }
+        result = {'data': serialized_data, 'paging': paging}
 
         return jsonify(result), 200
 
     except Exception as e:
-        logger.error(f"Error getting places statistics: {str(e)}")
+        logger.error(f'Error getting places statistics: {str(e)}')
         return jsonify({'error': 'Failed to get places statistics'}), 500
 
 
@@ -220,7 +235,9 @@ def get_places_ranking_statistics():
         try:
             args = schema.load(request.args)
         except ValidationError as e:
-            return jsonify({'error': 'Invalid parameters', 'details': e.messages}), 400
+            return jsonify(
+                {'error': 'Invalid parameters', 'details': e.messages}
+            ), 400
 
         place_type = args['place_type']
         order = args['order']
@@ -229,17 +246,17 @@ def get_places_ranking_statistics():
         offset = (page - 1) * size
 
         # Build type filter for Neo4j query
-        type_filter = ""
+        type_filter = ''
         if place_type == 'things-to-do':
-            type_filter = "p:ThingToDo"
+            type_filter = 'p:ThingToDo'
         elif place_type == 'hotels':
-            type_filter = "p:Hotel"
+            type_filter = 'p:Hotel'
         elif place_type == 'restaurants':
-            type_filter = "p:Restaurant"
+            type_filter = 'p:Restaurant'
         else:
-            type_filter = "p:ThingToDo OR p:Hotel OR p:Restaurant"
+            type_filter = 'p:ThingToDo OR p:Hotel OR p:Restaurant'
 
-        order_clause = "DESC" if order == 'desc' else "ASC"
+        order_clause = 'DESC' if order == 'desc' else 'ASC'
 
         # Get places ordered by raw_ranking from Neo4j
         neo4j_query = f"""
@@ -268,44 +285,45 @@ def get_places_ranking_statistics():
         LIMIT $limit
         """
 
-        neo4j_query = neo4j_query.replace("{order_clause}", order_clause)
+        neo4j_query = neo4j_query.replace('{order_clause}', order_clause)
 
         places_data = execute_neo4j_query(
-            neo4j_query, 
-            {'offset': offset, 'limit': size}
+            neo4j_query, {'offset': offset, 'limit': size}
         )
 
         if not places_data:
-            return jsonify({
-                'data': [],
-                'paging': create_paging_metadata(0, page, 1, size, 0)
-            }), 200
+            return jsonify(
+                {
+                    'data': [],
+                    'paging': create_paging_metadata(0, page, 1, size, 0),
+                }
+            ), 200
 
         # Process place data and calculate review_number
         places_with_reviews = []
         for place_data in places_data:
             place = place_data['place']
             element_id = place_data['element_id']
-            
+
             # Calculate review_number from rating_histogram
             rating_histogram = place.get('rating_histogram', [])
             if rating_histogram and isinstance(rating_histogram, list):
                 review_number = sum(rating_histogram)
             else:
                 review_number = 0
-            
+
             place['review_number'] = review_number
             place['element_id'] = element_id
             place['type'] = place_data['type']
-            
+
             # Add city information
             if place_data.get('city_name'):
                 place['city'] = {
                     'created_at': place_data.get('city_created_at', ''),
                     'name': place_data['city_name'],
-                    'postal_code': place_data.get('city_postal_code', '')
+                    'postal_code': place_data.get('city_postal_code', ''),
                 }
-            
+
             places_with_reviews.append(place)
 
         # Get total count for pagination (separate query)
@@ -328,14 +346,14 @@ def get_places_ranking_statistics():
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
                 elif isinstance(city_data, dict):
                     # Already a dict, ensure it has required fields
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
 
         # Serialize data
@@ -343,18 +361,19 @@ def get_places_ranking_statistics():
         serialized_data = schema.dump(places_with_reviews)
 
         # Create paging info
-        paging = create_paging_metadata(offset, page, page_count, size, total_count)
+        paging = create_paging_metadata(
+            offset, page, page_count, size, total_count
+        )
 
-        result = {
-            'data': serialized_data,
-            'paging': paging
-        }
+        result = {'data': serialized_data, 'paging': paging}
 
         return jsonify(result), 200
 
     except Exception as e:
-        logger.error(f"Error getting places ranking statistics: {str(e)}")
-        return jsonify({'error': 'Failed to get places ranking statistics'}), 500
+        logger.error(f'Error getting places ranking statistics: {str(e)}')
+        return jsonify(
+            {'error': 'Failed to get places ranking statistics'}
+        ), 500
 
 
 @blueprint.get('/statistics/summary')
@@ -368,17 +387,17 @@ def get_dashboard_summary():
         FROM user_trips
         WHERE is_optimized = true
         """
-        
+
         total_trips_query = """
         SELECT COUNT(*) as total_trips
         FROM user_trips
         """
-        
+
         total_users_query = """
         SELECT COUNT(*) as total_users
         FROM users
         """
-        
+
         avg_places_per_trip_query = """
         SELECT AVG(place_count) as avg_places_per_trip
         FROM (
@@ -388,22 +407,40 @@ def get_dashboard_summary():
         ) as trip_place_counts
         """
 
-        total_optimized_result = db.session.execute(db.text(total_optimized_trips_query)).fetchone()
-        total_trips_result = db.session.execute(db.text(total_trips_query)).fetchone()
-        total_users_result = db.session.execute(db.text(total_users_query)).fetchone()
-        avg_places_result = db.session.execute(db.text(avg_places_per_trip_query)).fetchone()
+        total_optimized_result = db.session.execute(
+            db.text(total_optimized_trips_query)
+        ).fetchone()
+        total_trips_result = db.session.execute(
+            db.text(total_trips_query)
+        ).fetchone()
+        total_users_result = db.session.execute(
+            db.text(total_users_query)
+        ).fetchone()
+        avg_places_result = db.session.execute(
+            db.text(avg_places_per_trip_query)
+        ).fetchone()
 
         summary = {
-            'total_optimized_trips': total_optimized_result.total_optimized_trips if total_optimized_result else 0,
-            'total_trips': total_trips_result.total_trips if total_trips_result else 0,
-            'total_users': total_users_result.total_users if total_users_result else 0,
-            'average_places_per_trip': round(avg_places_result.avg_places_per_trip, 2) if avg_places_result and avg_places_result.avg_places_per_trip else 0
+            'total_optimized_trips': total_optimized_result.total_optimized_trips
+            if total_optimized_result
+            else 0,
+            'total_trips': total_trips_result.total_trips
+            if total_trips_result
+            else 0,
+            'total_users': total_users_result.total_users
+            if total_users_result
+            else 0,
+            'average_places_per_trip': round(
+                avg_places_result.avg_places_per_trip, 2
+            )
+            if avg_places_result and avg_places_result.avg_places_per_trip
+            else 0,
         }
 
         return jsonify(summary), 200
 
     except Exception as e:
-        logger.error(f"Error getting dashboard summary: {str(e)}")
+        logger.error(f'Error getting dashboard summary: {str(e)}')
         return jsonify({'error': 'Failed to get dashboard summary'}), 500
 
 
@@ -415,9 +452,9 @@ def get_monthly_user_statistics():
         from datetime import datetime
         import json
         from flask import Response
-        
+
         current_year = datetime.now().year
-        
+
         # Query to get user creation statistics by month for current year
         monthly_stats_query = """
         SELECT 
@@ -428,56 +465,76 @@ def get_monthly_user_statistics():
         GROUP BY EXTRACT(MONTH FROM created_at)
         ORDER BY month_number
         """
-        
+
         # Get total users count
         total_users_query = """
         SELECT COUNT(*) as total_users
         FROM users
         """
-        
+
         monthly_result = db.session.execute(
-            db.text(monthly_stats_query), 
-            {'current_year': current_year}
+            db.text(monthly_stats_query), {'current_year': current_year}
         )
-        
+
         total_result = db.session.execute(db.text(total_users_query))
-        
+
         # Month names in chronological order
         months_in_order = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
+            'January',
+            'February',
+            'March',
+            'April',
+            'May',
+            'June',
+            'July',
+            'August',
+            'September',
+            'October',
+            'November',
+            'December',
         ]
-        
+
         # Month names mapping
         month_names = {
-            1: "January", 2: "February", 3: "March", 4: "April",
-            5: "May", 6: "June", 7: "July", 8: "August", 
-            9: "September", 10: "October", 11: "November", 12: "December"
+            1: 'January',
+            2: 'February',
+            3: 'March',
+            4: 'April',
+            5: 'May',
+            6: 'June',
+            7: 'July',
+            8: 'August',
+            9: 'September',
+            10: 'October',
+            11: 'November',
+            12: 'December',
         }
-        
+
         # Create dictionary with actual data
         monthly_data = {}
         for row in monthly_result:
             month_name = month_names[int(row.month_number)]
             monthly_data[month_name] = row.user_count
-        
+
         # Build response dictionary in correct order
         monthly_stats = {}
-        
+
         # Add months in chronological order
         for month_name in months_in_order:
             monthly_stats[month_name] = monthly_data.get(month_name, 0)
-        
+
         # Get total users
-        total_users = total_result.fetchone().total_users if total_result else 0
-        
+        total_users = (
+            total_result.fetchone().total_users if total_result else 0
+        )
+
         # Add total to response
         monthly_stats['total_user'] = total_users
-        
+
         # Return JSON response with preserved order
         response_json = json.dumps(monthly_stats, separators=(',', ':'))
         return Response(response_json, content_type='application/json'), 200
 
     except Exception as e:
-        logger.error(f"Error getting monthly user statistics: {str(e)}")
-        return jsonify({'error': 'Failed to get monthly user statistics'}), 500 
+        logger.error(f'Error getting monthly user statistics: {str(e)}')
+        return jsonify({'error': 'Failed to get monthly user statistics'}), 500

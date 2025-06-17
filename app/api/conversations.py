@@ -1,3 +1,4 @@
+import json
 import logging
 
 from flask import Blueprint, request
@@ -7,7 +8,7 @@ from marshmallow import fields, validate
 
 from app.environments import FRONTEND_URL, GEMINI_API_KEY
 from app.extensions import ma
-from app.utils import execute_neo4j_query
+from app.utils import execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('conversations', __name__, url_prefix='/conversations')
@@ -15,7 +16,7 @@ bp = Blueprint('conversations', __name__, url_prefix='/conversations')
 SYSTEM_INSTRUCTION = """You are TripWise, a helpful and polite virtual assistant for the official Da Nang tourism website. You assist users with tourism-related inquiries including hotels, dining, attractions, and activities in Da Nang.
 
 1. General Tourism Queries
-- Be polite, clear, and concise in your responses.
+- Be friendly, polite, clear, and concise in your responses.
 - Respond to user questions related to Da Nang travel: Popular attractions, activities, weather, transportation, cultural experiences, etc.
 
 2. Hotel Suggestions
@@ -54,6 +55,15 @@ If the question is unrelated to Da Nang tourism:
 
 # Function
 def get_hotel_list():
+    cache_key = 'hotel_list:assistant'
+    redis = get_redis()
+    try:
+        cached_result = redis.get(cache_key)
+        if cached_result:
+            return json.loads(cached_result)
+    except Exception:
+        pass
+
     result = execute_neo4j_query(
         """
         MATCH (h:Hotel)
@@ -61,16 +71,31 @@ def get_hotel_list():
             elementId(h) AS id,
             h.name AS name
         ORDER BY h.raw_ranking DESC
-        LIMIT 50
+        LIMIT 150
         """,
     )
     if not result:
         return []
 
+    # Cache the result for 6 hours
+    try:
+        redis.setex(cache_key, 21600, json.dumps(result))
+    except Exception:
+        pass
+
     return result
 
 
 def get_restaurant_list():
+    cache_key = 'restaurant_list:assistant'
+    redis = get_redis()
+    try:
+        cached_result = redis.get(cache_key)
+        if cached_result:
+            return json.loads(cached_result)
+    except Exception:
+        pass
+
     result = execute_neo4j_query(
         """
         MATCH (r:Restaurant)
@@ -78,16 +103,31 @@ def get_restaurant_list():
             elementId(r) AS id,
             r.name AS name
         ORDER BY r.raw_ranking DESC
-        LIMIT 50
+        LIMIT 150
         """,
     )
     if not result:
         return []
 
+    # Cache the result for 6 hours
+    try:
+        redis.setex(cache_key, 21600, json.dumps(result))
+    except Exception:
+        pass
+
     return result
 
 
 def get_attraction_list():
+    cache_key = 'attraction_list:assistant'
+    redis = get_redis()
+    try:
+        cached_result = redis.get(cache_key)
+        if cached_result:
+            return json.loads(cached_result)
+    except Exception:
+        pass
+
     result = execute_neo4j_query(
         """
         MATCH (r:ThingToDo)
@@ -100,6 +140,12 @@ def get_attraction_list():
     )
     if not result:
         return []
+
+    # Cache the result for 6 hours
+    try:
+        redis.setex(cache_key, 21600, json.dumps(result))
+    except Exception:
+        pass
 
     return result
 

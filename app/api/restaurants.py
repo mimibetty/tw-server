@@ -325,22 +325,13 @@ def get_restaurants():
 
     # Get search and filter parameters
     search = request.args.get('search', default='', type=str)
-    rating = request.args.get('rating', type=float) #ok
+    rating = request.args.get('rating', type=float)  # ok
     cuisines = request.args.get('cuisines', type=str)
-    meal_types = request.args.get('meal_types', type=str)  #ok
+    meal_types = request.args.get('meal_types', type=str)  # ok
     features = request.args.get('features', type=str)  # Amenities #ok
     dietary_restrictions = request.args.get('dietary_restrictions', type=str)
     dishes = request.args.get('dishes', type=str)
 
-    print('--------------------------------')
-    print('search', search)
-    print('rating', rating)
-    print('cuisines', cuisines)
-    print('meal_types', meal_types)
-    print('features', features)
-    print('dietary_restrictions', dietary_restrictions)
-    print('dishes', dishes)
-    print('--------------------------------')
     user_id = None
     try:
         user_id = get_jwt_identity()
@@ -581,17 +572,17 @@ def _filter_restaurants(
     if rating is not None:
         cache_parts.append(f'rating={rating}')
     if cuisines:
-        cache_parts.append(f"cuisines={','.join(sorted(cuisines))}")
+        cache_parts.append(f'cuisines={",".join(sorted(cuisines))}')
     if meal_types:
-        cache_parts.append(f"meal_types={','.join(sorted(meal_types))}")
+        cache_parts.append(f'meal_types={",".join(sorted(meal_types))}')
     if features:
-        cache_parts.append(f"features={','.join(sorted(features))}")
+        cache_parts.append(f'features={",".join(sorted(features))}')
     if dietary_restrictions:
         cache_parts.append(
-            f"dietary_restrictions={','.join(sorted(dietary_restrictions))}"
+            f'dietary_restrictions={",".join(sorted(dietary_restrictions))}'
         )
     if dishes:
-        cache_parts.append(f"dishes={','.join(sorted(dishes))}")
+        cache_parts.append(f'dishes={",".join(sorted(dishes))}')
     cache_key = f'restaurants:{":".join(cache_parts)}'
 
     # Check Redis cache first
@@ -648,9 +639,7 @@ def _filter_restaurants(
         )
         query_params['dietary_restrictions'] = dietary_restrictions
     if dishes:
-        where_clauses.append(
-            'ALL(d_name IN $dishes WHERE d_name IN r.dishes)'
-        )
+        where_clauses.append('ALL(d_name IN $dishes WHERE d_name IN r.dishes)')
         query_params['dishes'] = dishes
 
     where_str = ''
@@ -663,7 +652,9 @@ def _filter_restaurants(
     RETURN count(r) AS total_count
     """
     total_count_result = execute_neo4j_query(count_query, query_params)
-    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+    total_count = (
+        total_count_result[0]['total_count'] if total_count_result else 0
+    )
 
     restaurants_query = f"""
     MATCH (r:Restaurant)
@@ -808,7 +799,7 @@ def get_restaurant(restaurant_id):
 def delete_restaurant(restaurant_id):
     """
     Delete a restaurant and all related data.
-    
+
     This endpoint will:
     - Remove the restaurant from Neo4j database
     - Delete all user reviews of this restaurant
@@ -824,24 +815,24 @@ def delete_restaurant(restaurant_id):
             WHERE elementId(r) = $restaurant_id
             RETURN r.name as name, r.type as type
             """,
-            {'restaurant_id': restaurant_id}
+            {'restaurant_id': restaurant_id},
         )
-        
+
         if not result:
             return {'error': 'Restaurant not found'}, 404
-        
+
         restaurant_name = result[0]['name']
-        
+
         # Use the comprehensive deletion utility
         deletion_summary = delete_place_and_related_data(restaurant_id)
-        
+
         # Check if deletion was successful
         if not deletion_summary['place_deleted']:
             return {
                 'error': 'Failed to delete restaurant',
-                'details': deletion_summary['errors']
+                'details': deletion_summary['errors'],
             }, 500
-        
+
         # Prepare success response
         response = {
             'message': f'Restaurant "{restaurant_name}" has been successfully deleted',
@@ -850,19 +841,19 @@ def delete_restaurant(restaurant_id):
                 'reviews_deleted': deletion_summary['reviews_deleted'],
                 'favorites_removed': deletion_summary['favorites_deleted'],
                 'trips_updated': deletion_summary['trips_updated'],
-                'cache_cleared': deletion_summary['cache_cleared']
-            }
+                'cache_cleared': deletion_summary['cache_cleared'],
+            },
         }
-        
+
         # Include any non-critical errors as warnings
         if deletion_summary['errors']:
             response['warnings'] = deletion_summary['errors']
-        
+
         return response, 200
-        
+
     except Exception as e:
-        logger.error(f"Error deleting restaurant {restaurant_id}: {str(e)}")
+        logger.error(f'Error deleting restaurant {restaurant_id}: {str(e)}')
         return {
             'error': 'An unexpected error occurred while deleting the restaurant',
-            'details': str(e)
+            'details': str(e),
         }, 500

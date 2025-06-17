@@ -69,7 +69,9 @@ def read_sample_data(filename: str = 'data.txt') -> List[Dict[str, Any]]:
         return []
 
 
-def fetch_things_to_do_data(url: str, limit: int = 100) -> List[Dict[str, Any]]:
+def fetch_things_to_do_data(
+    url: str, limit: int = 100
+) -> List[Dict[str, Any]]:
     """
     Fetch things to do data from external API
 
@@ -299,7 +301,9 @@ def bulk_insert_things_to_do(
     for attraction in data:
         try:
             # Process the attraction data
-            thing_to_do_data = process_thing_to_do_data(attraction, postal_code)
+            thing_to_do_data = process_thing_to_do_data(
+                attraction, postal_code
+            )
 
             # Skip attractions without required fields
             if (
