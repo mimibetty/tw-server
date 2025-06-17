@@ -13,7 +13,7 @@ from app.utils import (
     get_all_subcategories,
     get_all_subtypes,
     get_redis,
-    delete_place_and_related_data
+    delete_place_and_related_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -230,8 +230,7 @@ def get_things_to_do():
     rating = request.args.get('rating', type=float)
     subtypes = request.args.get('subtypes', type=str)
     subcategories = request.args.get('subcategories', type=str)
-    print("Subtypes:", subtypes)
-    print("Subcategories:", subcategories)
+
     # Get sort order
     sort_order = request.args.get('order', default='desc', type=str)
     sort_order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
@@ -445,9 +444,9 @@ def _filter_things_to_do(
     if rating is not None:
         cache_parts.append(f'rating={rating}')
     if subtypes:
-        cache_parts.append(f"subtypes={','.join(sorted(subtypes))}")
+        cache_parts.append(f'subtypes={",".join(sorted(subtypes))}')
     if subcategories:
-        cache_parts.append(f"subcategories={','.join(sorted(subcategories))}")
+        cache_parts.append(f'subcategories={",".join(sorted(subcategories))}')
     cache_key = f'things-to-do:{":".join(cache_parts)}'
 
     # Check Redis cache first
@@ -507,7 +506,9 @@ def _filter_things_to_do(
     RETURN count(t) AS total_count
     """
     total_count_result = execute_neo4j_query(count_query, query_params)
-    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+    total_count = (
+        total_count_result[0]['total_count'] if total_count_result else 0
+    )
 
     # Get the things to do with pagination and filter
     things_query = f"""
@@ -563,9 +564,7 @@ def _process_things_to_do_results(result, user_id):
             if rh and isinstance(rh, list) and len(rh) == 5:
                 total = sum(rh)
                 if total > 0:
-                    rating = (
-                        sum((i + 1) * rh[i] for i in range(5)) / total
-                    )
+                    rating = sum((i + 1) * rh[i] for i in range(5)) / total
                     thing['rating'] = round(rating, 1)
         processed_results.append(thing)
 
@@ -690,7 +689,7 @@ def get_thing_to_do(thing_to_do_id):
 def delete_thing_to_do(thing_to_do_id):
     """
     Delete a thing-to-do and all related data.
-    
+
     This endpoint will:
     - Remove the thing-to-do from Neo4j database
     - Delete all user reviews of this thing-to-do
@@ -706,24 +705,24 @@ def delete_thing_to_do(thing_to_do_id):
             WHERE elementId(t) = $thing_to_do_id
             RETURN t.name as name, t.type as type
             """,
-            {'thing_to_do_id': thing_to_do_id}
+            {'thing_to_do_id': thing_to_do_id},
         )
-        
+
         if not result:
             return {'error': 'Thing to do not found'}, 404
-        
+
         thing_name = result[0]['name']
-        
+
         # Use the comprehensive deletion utility
         deletion_summary = delete_place_and_related_data(thing_to_do_id)
-        
+
         # Check if deletion was successful
         if not deletion_summary['place_deleted']:
             return {
                 'error': 'Failed to delete thing to do',
-                'details': deletion_summary['errors']
+                'details': deletion_summary['errors'],
             }, 500
-        
+
         # Prepare success response
         response = {
             'message': f'Thing to do "{thing_name}" has been successfully deleted',
@@ -732,21 +731,19 @@ def delete_thing_to_do(thing_to_do_id):
                 'reviews_deleted': deletion_summary['reviews_deleted'],
                 'favorites_removed': deletion_summary['favorites_deleted'],
                 'trips_updated': deletion_summary['trips_updated'],
-                'cache_cleared': deletion_summary['cache_cleared']
-            }
+                'cache_cleared': deletion_summary['cache_cleared'],
+            },
         }
-        
+
         # Include any non-critical errors as warnings
         if deletion_summary['errors']:
             response['warnings'] = deletion_summary['errors']
-        
+
         return response, 200
-        
+
     except Exception as e:
-        logger.error(f"Error deleting thing to do {thing_to_do_id}: {str(e)}")
+        logger.error(f'Error deleting thing to do {thing_to_do_id}: {str(e)}')
         return {
             'error': 'An unexpected error occurred while deleting the thing to do',
-            'details': str(e)
+            'details': str(e),
         }, 500
-
-

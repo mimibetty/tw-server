@@ -12,7 +12,9 @@ from app.utils import execute_neo4j_query, get_redis, create_paging
 from geopy.distance import geodesic
 
 logger = logging.getLogger(__name__)
-blueprint = Blueprint('recommendations', __name__, url_prefix='/recommendations')
+blueprint = Blueprint(
+    'recommendations', __name__, url_prefix='/recommendations'
+)
 
 
 class RecommendationSchema(ma.Schema):
@@ -29,7 +31,9 @@ class RecommendationSchema(ma.Schema):
     photos = fields.List(fields.String(), dump_only=True, default=list)
     price_levels = fields.List(fields.String(), dump_only=True, default=list)
     rating = fields.Float(dump_only=True, allow_none=True)
-    rating_histogram = fields.List(fields.Integer(), dump_only=True, default=list)
+    rating_histogram = fields.List(
+        fields.Integer(), dump_only=True, default=list
+    )
     raw_ranking = fields.Float(dump_only=True)
     street = fields.String(dump_only=True, allow_none=True)
     subcategories = fields.List(fields.String(), dump_only=True, default=list)
@@ -45,15 +49,22 @@ class RecommendationQuerySchema(ma.Schema):
     place_type = fields.String(
         required=False,
         missing='all',
-        validate=lambda x: x in ['all', 'hotels', 'restaurants', 'things-to-do']
+        validate=lambda x: x
+        in ['all', 'hotels', 'restaurants', 'things-to-do'],
     )
     page = fields.Integer(required=False, missing=1, validate=lambda x: x >= 1)
-    size = fields.Integer(required=False, missing=10, validate=lambda x: 1 <= x <= 50)
+    size = fields.Integer(
+        required=False, missing=10, validate=lambda x: 1 <= x <= 50
+    )
     exclude_visited = fields.Boolean(required=False, missing=True)
-    min_rating = fields.Float(required=False, missing=0.0, validate=lambda x: 0.0 <= x <= 5.0)
+    min_rating = fields.Float(
+        required=False, missing=0.0, validate=lambda x: 0.0 <= x <= 5.0
+    )
     user_lat = fields.Float(required=False, allow_none=True)
     user_lng = fields.Float(required=False, allow_none=True)
-    max_distance_km = fields.Float(required=False, allow_none=True, validate=lambda x: x > 0)
+    max_distance_km = fields.Float(
+        required=False, allow_none=True, validate=lambda x: x > 0
+    )
 
     @validates('user_lat')
     def validate_latitude(self, value):
@@ -73,23 +84,26 @@ def get_user_preferences(user_id: str) -> Dict:
     try:
         # Get user's favorite places
         favorites_result = db.session.execute(
-            db.text("SELECT place_id FROM user_favourites WHERE user_id = :user_id"),
-            {'user_id': user_id}
+            db.text(
+                'SELECT place_id FROM user_favourites WHERE user_id = :user_id'
+            ),
+            {'user_id': user_id},
         )
 
         favorite_place_ids = [row.place_id for row in favorites_result]
 
-
         # Get user's reviews with ratings
         reviews_result = db.session.execute(
-            db.text("SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id"),
-            {'user_id': user_id}
+            db.text(
+                'SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id'
+            ),
+            {'user_id': user_id},
         )
         reviews = {row.place_id: row.rating for row in reviews_result}
 
         # Get place details from Neo4j for favorites and reviewed places
         all_place_ids = list(set(favorite_place_ids + list(reviews.keys())))
-        
+
         if not all_place_ids:
             return {
                 'subcategories': {},
@@ -97,7 +111,7 @@ def get_user_preferences(user_id: str) -> Dict:
                 'avg_rating_preference': 0.0,
                 'place_count': 0,
                 'favorite_places': [],
-                'reviewed_places': {}
+                'reviewed_places': {},
             }
 
         # Get place details from Neo4j
@@ -106,16 +120,15 @@ def get_user_preferences(user_id: str) -> Dict:
         MATCH (p) WHERE elementId(p) = pid
         OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
         OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
-        RETURN elementId(p) AS place_id, 
+        RETURN elementId(p) AS place_id,
                collect(DISTINCT sc.name) AS subcategories,
                collect(DISTINCT st.name) AS subtypes,
                p.rating AS place_rating
         """
-        
-        places_data = execute_neo4j_query(neo4j_query, {'place_ids': all_place_ids})
-        print("places_data")
-        print(places_data)
-        print("--------------------------------")
+
+        places_data = execute_neo4j_query(
+            neo4j_query, {'place_ids': all_place_ids}
+        )
         if not places_data:
             return {
                 'subcategories': {},
@@ -123,7 +136,7 @@ def get_user_preferences(user_id: str) -> Dict:
                 'avg_rating_preference': 0.0,
                 'place_count': 0,
                 'favorite_places': [],
-                'reviewed_places': {}
+                'reviewed_places': {},
             }
 
         # Analyze preferences
@@ -133,10 +146,10 @@ def get_user_preferences(user_id: str) -> Dict:
 
         for place in places_data:
             place_id = place['place_id']
-            
+
             # Weight: favorites = 2.0, high ratings (4-5) = 1.5, medium ratings (3) = 1.0, low ratings (1-2) = 0.5
             weight = 2.0 if place_id in favorite_place_ids else 0.0
-            
+
             if place_id in reviews:
                 rating = reviews[place_id]
                 if rating >= 4:
@@ -145,9 +158,9 @@ def get_user_preferences(user_id: str) -> Dict:
                     weight += 1.0
                 else:
                     weight += 0.5
-            
+
             total_weight += weight
-            
+
             # Add subcategory preferences
             for subcategory in place['subcategories']:
                 if subcategory:  # Skip empty strings
@@ -160,8 +173,12 @@ def get_user_preferences(user_id: str) -> Dict:
 
         # Normalize scores
         if total_weight > 0:
-            subcategory_scores = {k: v/total_weight for k, v in subcategory_scores.items()}
-            subtype_scores = {k: v/total_weight for k, v in subtype_scores.items()}
+            subcategory_scores = {
+                k: v / total_weight for k, v in subcategory_scores.items()
+            }
+            subtype_scores = {
+                k: v / total_weight for k, v in subtype_scores.items()
+            }
         # Calculate average rating preference
         user_ratings = list(reviews.values())
         avg_rating_preference = np.mean(user_ratings) if user_ratings else 0.0
@@ -172,22 +189,24 @@ def get_user_preferences(user_id: str) -> Dict:
             'avg_rating_preference': avg_rating_preference,
             'place_count': len(all_place_ids),
             'favorite_places': favorite_place_ids,
-            'reviewed_places': reviews
+            'reviewed_places': reviews,
         }
 
     except Exception as e:
-        logger.error(f"Error getting user preferences: {str(e)}")
+        logger.error(f'Error getting user preferences: {str(e)}')
         return {
             'subcategories': {},
             'subtypes': {},
             'avg_rating_preference': 0.0,
             'place_count': 0,
             'favorite_places': [],
-            'reviewed_places': {}
+            'reviewed_places': {},
         }
 
 
-def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, str]:
+def calculate_content_similarity(
+    place: Dict, user_prefs: Dict
+) -> Tuple[float, str]:
     """Calculate content-based similarity score between a place and user preferences."""
     try:
         score = 0.0
@@ -199,10 +218,12 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
         if place_subcategories and user_prefs['subcategories']:
             for subcategory in place_subcategories:
                 if subcategory in user_prefs['subcategories']:
-                    subcategory_score += user_prefs['subcategories'][subcategory]
+                    subcategory_score += user_prefs['subcategories'][
+                        subcategory
+                    ]
             subcategory_score = min(subcategory_score, 1.0)  # Cap at 1.0
             if subcategory_score > 0:
-                reasons.append(f"Category match ({subcategory_score:.1f})")
+                reasons.append(f'Category match ({subcategory_score:.1f})')
 
         # Subtype similarity (40% weight)
         subtype_score = 0.0
@@ -213,32 +234,40 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
                     subtype_score += user_prefs['subtypes'][subtype]
             subtype_score = min(subtype_score, 1.0)  # Cap at 1.0
             if subtype_score > 0:
-                reasons.append(f"Type match ({subtype_score:.1f})")
+                reasons.append(f'Type match ({subtype_score:.1f})')
 
         # Rating similarity (20% weight)
         rating_score = 0.0
         place_rating = place.get('rating', 0.0) or 0.0
         if user_prefs['avg_rating_preference'] > 0:
-            rating_diff = abs(place_rating - user_prefs['avg_rating_preference'])
-            rating_score = max(0, 1 - (rating_diff / 5.0))  # Normalized difference
+            rating_diff = abs(
+                place_rating - user_prefs['avg_rating_preference']
+            )
+            rating_score = max(
+                0, 1 - (rating_diff / 5.0)
+            )  # Normalized difference
             if rating_score > 0.6:
-                reasons.append(f"Rating match ({place_rating:.1f}★)")
+                reasons.append(f'Rating match ({place_rating:.1f}★)')
 
         # Calculate weighted score
-        score = (subcategory_score * 0.4) + (subtype_score * 0.4) + (rating_score * 0.2)
-        
+        score = (
+            (subcategory_score * 0.4)
+            + (subtype_score * 0.4)
+            + (rating_score * 0.2)
+        )
+
         # Bonus for high-rated places
         if place_rating >= 4.5:
             score += 0.1
-            reasons.append("Highly rated")
+            reasons.append('Highly rated')
 
-        reason = ", ".join(reasons) if reasons else "Popular place"
-        
+        reason = ', '.join(reasons) if reasons else 'Popular place'
+
         return score, reason
 
     except Exception as e:
-        logger.error(f"Error calculating content similarity: {str(e)}")
-        return 0.0, "Error in calculation"
+        logger.error(f'Error calculating content similarity: {str(e)}')
+        return 0.0, 'Error in calculation'
 
 
 # def get_collaborative_recommendations(user_id: str, place_type: str, limit: int) -> List[Dict]:
@@ -255,7 +284,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         ORDER BY common_favorites DESC
 #         LIMIT 20
 #         """
-        
+
 #         similar_users_result = db.session.execute(
 #             db.text(similar_users_query), {'user_id': user_id}
 #         )
@@ -278,7 +307,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         # Get recommendations from similar users
 #         placeholders = ', '.join([f':user_{i}' for i in range(len(similar_user_ids))])
 #         user_params = {f'user_{i}': uid for i, uid in enumerate(similar_user_ids)}
-        
+
 #         collaborative_query = f"""
 #         SELECT place_id, COUNT(*) as recommendation_count
 #         FROM (
@@ -290,12 +319,12 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         ORDER BY recommendation_count DESC
 #         LIMIT :limit
 #         """
-        
+
 #         params = {**user_params, 'limit': limit * 2}  # Get more to filter later
 #         collab_result = db.session.execute(db.text(collaborative_query), params)
-        
+
 #         recommended_place_ids = [
-#             row.place_id for row in collab_result 
+#             row.place_id for row in collab_result
 #             if row.place_id not in user_place_ids  # Exclude places user already knows
 #         ]
 
@@ -318,7 +347,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
 #         OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
 #         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-#         RETURN p AS place, 
+#         RETURN p AS place,
 #                elementId(p) AS element_id,
 #                collect(DISTINCT sc.name) AS subcategories,
 #                collect(DISTINCT st.name) AS subtypes,
@@ -329,7 +358,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         """
 
 #         places_data = execute_neo4j_query(
-#             neo4j_query, 
+#             neo4j_query,
 #             {'place_ids': recommended_place_ids[:limit], 'limit': limit}
 #         )
 
@@ -342,7 +371,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #             place['subtypes'] = [st for st in place_data['subtypes'] if st]
 #             place['similarity_score'] = 0.8  # High score for collaborative filtering
 #             place['recommendation_reason'] = "Liked by users with similar taste"
-            
+
 #             # Add city information
 #             if place_data.get('city_name'):
 #                 place['city'] = {
@@ -350,7 +379,7 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #                     'name': place_data['city_name'],
 #                     'postal_code': place_data.get('city_postal_code', '')
 #                 }
-            
+
 #             recommendations.append(place)
 
 #         return recommendations
@@ -360,7 +389,9 @@ def calculate_content_similarity(place: Dict, user_prefs: Dict) -> Tuple[float, 
 #         return []
 
 
-def get_content_based_recommendations(user_id: str, place_type: str, limit: int, user_prefs: Dict) -> List[Dict]:
+def get_content_based_recommendations(
+    user_id: str, place_type: str, limit: int, user_prefs: Dict
+) -> List[Dict]:
     """Get recommendations based on content similarity."""
     try:
         # Get user's known places to exclude
@@ -375,15 +406,15 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
         user_place_ids = [row.place_id for row in user_places_result]
 
         # Build Neo4j query based on place type
-        type_filter = ""
+        type_filter = ''
         if place_type == 'things-to-do':
-            type_filter = "p:ThingToDo"
+            type_filter = 'p:ThingToDo'
         elif place_type == 'hotels':
-            type_filter = "p:Hotel"
+            type_filter = 'p:Hotel'
         elif place_type == 'restaurants':
-            type_filter = "p:Restaurant"
+            type_filter = 'p:Restaurant'
         else:
-            type_filter = "p:ThingToDo OR p:Hotel OR p:Restaurant"
+            type_filter = 'p:ThingToDo OR p:Hotel OR p:Restaurant'
 
         # Get places with subcategories and subtypes
         neo4j_query = f"""
@@ -391,7 +422,7 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
         OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
         OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-        WITH p, 
+        WITH p,
              elementId(p) AS element_id,
              collect(DISTINCT sc.name) AS subcategories,
              collect(DISTINCT st.name) AS subtypes,
@@ -400,7 +431,7 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
              c.postal_code AS city_postal_code
         WHERE NOT elementId(p) IN $excluded_places
         AND p.rating IS NOT NULL
-        RETURN p AS place, 
+        RETURN p AS place,
                element_id,
                subcategories,
                subtypes,
@@ -413,11 +444,12 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
 
         excluded_places = user_place_ids if user_place_ids else ['']
         places_data = execute_neo4j_query(
-            neo4j_query, 
+            neo4j_query,
             {
                 'excluded_places': excluded_places,
-                'limit_multiplier': limit * 3  # Get more to calculate similarity and then filter
-            }
+                'limit_multiplier': limit
+                * 3,  # Get more to calculate similarity and then filter
+            },
         )
 
         if not places_data:
@@ -429,63 +461,59 @@ def get_content_based_recommendations(user_id: str, place_type: str, limit: int,
         for place_data in places_data:
             place = place_data['place']
             place['element_id'] = place_data['element_id']
-            place['subcategories'] = [sc for sc in place_data['subcategories'] if sc]
+            place['subcategories'] = [
+                sc for sc in place_data['subcategories'] if sc
+            ]
             place['subtypes'] = [st for st in place_data['subtypes'] if st]
-            
-            similarity_score, reason = calculate_content_similarity(place, user_prefs)
+
+            similarity_score, reason = calculate_content_similarity(
+                place, user_prefs
+            )
             place['similarity_score'] = similarity_score
             place['recommendation_reason'] = reason
-            # print("place")
-            # print(place)
-            # print("similarity_score")
-            # print(similarity_score)
-            # print("recommendation_reason")
-            # print(reason)
-            # print("--------------------------------")
             # Add city information
             if place_data.get('city_name'):
                 place['city'] = {
                     'created_at': place_data.get('city_created_at', ''),
                     'name': place_data['city_name'],
-                    'postal_code': place_data.get('city_postal_code', '')
+                    'postal_code': place_data.get('city_postal_code', ''),
                 }
-                
+
             scored_places.append(place)
 
         # Sort by similarity score and return top results
         scored_places.sort(key=lambda x: x['similarity_score'], reverse=True)
-        # print("scored_places")
-        # print(scored_places)
-        # print("--------------------------------")
         return scored_places[:limit]
 
     except Exception as e:
-        logger.error(f"Error getting content-based recommendations: {str(e)}")
+        logger.error(f'Error getting content-based recommendations: {str(e)}')
         return []
 
 
-def get_popular_recommendations(place_type: str, limit: int, excluded_places: List[str] = None) -> List[Dict]:
+def get_popular_recommendations(
+    place_type: str, limit: int, excluded_places: List[str] = None
+) -> List[Dict]:
     """Get popular places as fallback recommendations."""
     try:
         excluded_places = excluded_places or ['']
-        
+
         # Build Neo4j query based on place type
-        type_filter = ""
+        type_filter = ''
         if place_type == 'things-to-do':
-            type_filter = "p:ThingToDo"
+            type_filter = 'p:ThingToDo'
         elif place_type == 'hotels':
-            type_filter = "p:Hotel"
+            type_filter = 'p:Hotel'
         elif place_type == 'restaurants':
-            type_filter = "p:Restaurant"
+            type_filter = 'p:Restaurant'
         else:
-            type_filter = "p:ThingToDo OR p:Hotel OR p:Restaurant"
+            type_filter = 'p:ThingToDo OR p:Hotel OR p:Restaurant'
 
         neo4j_query = f"""
         MATCH (p) WHERE ({type_filter})
         OPTIONAL MATCH (p)-[:HAS_SUBCATEGORY]->(sc:Subcategory)
         OPTIONAL MATCH (p)-[:HAS_SUBTYPE]->(st:Subtype)
         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-        WITH p, 
+        WITH p,
              elementId(p) AS element_id,
              collect(DISTINCT sc.name) AS subcategories,
              collect(DISTINCT st.name) AS subtypes,
@@ -494,7 +522,7 @@ def get_popular_recommendations(place_type: str, limit: int, excluded_places: Li
              c.postal_code AS city_postal_code
         WHERE NOT elementId(p) IN $excluded_places
         AND p.rating IS NOT NULL
-        RETURN p AS place, 
+        RETURN p AS place,
                element_id,
                subcategories,
                subtypes,
@@ -506,33 +534,34 @@ def get_popular_recommendations(place_type: str, limit: int, excluded_places: Li
         """
 
         places_data = execute_neo4j_query(
-            neo4j_query, 
-            {'excluded_places': excluded_places, 'limit': limit}
+            neo4j_query, {'excluded_places': excluded_places, 'limit': limit}
         )
 
         recommendations = []
         for place_data in places_data:
             place = place_data['place']
             place['element_id'] = place_data['element_id']
-            place['subcategories'] = [sc for sc in place_data['subcategories'] if sc]
+            place['subcategories'] = [
+                sc for sc in place_data['subcategories'] if sc
+            ]
             place['subtypes'] = [st for st in place_data['subtypes'] if st]
             place['similarity_score'] = 0.5  # Medium score for popular places
-            place['recommendation_reason'] = "Popular in Da Nang"
-            
+            place['recommendation_reason'] = 'Popular in Da Nang'
+
             # Add city information
             if place_data.get('city_name'):
                 place['city'] = {
                     'created_at': place_data.get('city_created_at', ''),
                     'name': place_data['city_name'],
-                    'postal_code': place_data.get('city_postal_code', '')
+                    'postal_code': place_data.get('city_postal_code', ''),
                 }
-                
+
             recommendations.append(place)
 
         return recommendations
 
     except Exception as e:
-        logger.error(f"Error getting popular recommendations: {str(e)}")
+        logger.error(f'Error getting popular recommendations: {str(e)}')
         return []
 
 
@@ -544,32 +573,39 @@ def apply_filters(places: List[Dict], filters: Dict) -> List[Dict]:
         # Apply minimum rating filter
         if filters.get('min_rating', 0.0) > 0:
             filtered_places = [
-                place for place in filtered_places 
+                place
+                for place in filtered_places
                 if (place.get('rating') or 0.0) >= filters['min_rating']
             ]
 
         # Apply distance filter if user location is provided
-        if (filters.get('user_lat') is not None and 
-            filters.get('user_lng') is not None and 
-            filters.get('max_distance_km') is not None):
-            
+        if (
+            filters.get('user_lat') is not None
+            and filters.get('user_lng') is not None
+            and filters.get('max_distance_km') is not None
+        ):
             user_location = (filters['user_lat'], filters['user_lng'])
             max_distance = filters['max_distance_km']
-            
+
             distance_filtered = []
             for place in filtered_places:
-                if place.get('latitude') is not None and place.get('longitude') is not None:
+                if (
+                    place.get('latitude') is not None
+                    and place.get('longitude') is not None
+                ):
                     place_location = (place['latitude'], place['longitude'])
-                    distance = geodesic(user_location, place_location).kilometers
+                    distance = geodesic(
+                        user_location, place_location
+                    ).kilometers
                     if distance <= max_distance:
                         distance_filtered.append(place)
-            
+
             filtered_places = distance_filtered
 
         return filtered_places
 
     except Exception as e:
-        logger.error(f"Error applying filters: {str(e)}")
+        logger.error(f'Error applying filters: {str(e)}')
         return places
 
 
@@ -583,36 +619,39 @@ def get_recommendations():
         try:
             args = schema.load(request.args)
         except ValidationError as e:
-            return jsonify({'error': 'Invalid parameters', 'details': e.messages}), 400
+            return jsonify(
+                {'error': 'Invalid parameters', 'details': e.messages}
+            ), 400
 
         user_id = get_jwt_identity()
         place_type = args['place_type']
         page = args['page']
         size = args['size']
-        
+
         # Calculate offset for pagination
         offset = (page - 1) * size
 
         # Check cache first
-        cache_key = f"recommendations:{user_id}:{place_type}:{size}:{page}"
+        cache_key = f'recommendations:{user_id}:{place_type}:{size}:{page}'
         try:
             redis = get_redis()
             cached_data = redis.get(cache_key)
             if cached_data:
-                logger.info(f"Returning cached recommendations for user {user_id}")
+                logger.info(
+                    f'Returning cached recommendations for user {user_id}'
+                )
                 return jsonify(json.loads(cached_data)), 200
         except Exception as e:
-            logger.warning(f"Redis cache error: {str(e)}")
+            logger.warning(f'Redis cache error: {str(e)}')
 
         # Get user preferences
         user_prefs = get_user_preferences(user_id)
-        # print("user_prefs")
-        # print(user_prefs)
-        # print("--------------------------------")
         # Get a larger set of recommendations first (for better pagination results)
-        total_recommendations_to_fetch = max(100, size * 5)  # Fetch more for better filtering
+        total_recommendations_to_fetch = max(
+            100, size * 5
+        )  # Fetch more for better filtering
         recommendations = []
-        
+
         # If user has enough interaction data, use hybrid approach
         if user_prefs['place_count'] >= 3:
             # Get collaborative filtering recommendations (30%)
@@ -622,19 +661,20 @@ def get_recommendations():
             # Get content-based recommendations (50%)
             # content_limit = max(15, total_recommendations_to_fetch - len(collab_recs))
             content_limit = max(15, total_recommendations_to_fetch)
-            content_recs = get_content_based_recommendations(user_id, place_type, content_limit, user_prefs)
+            content_recs = get_content_based_recommendations(
+                user_id, place_type, content_limit, user_prefs
+            )
             recommendations.extend(content_recs)
 
         # Fill remaining slots with popular places
         current_place_ids = [place['element_id'] for place in recommendations]
         remaining_limit = total_recommendations_to_fetch - len(recommendations)
-        
-        if remaining_limit > 0:
-            popular_recs = get_popular_recommendations(place_type, remaining_limit, current_place_ids)
-            recommendations.extend(popular_recs)
-            # print("popular_recs")
-            # print(popular_recs)
 
+        if remaining_limit > 0:
+            popular_recs = get_popular_recommendations(
+                place_type, remaining_limit, current_place_ids
+            )
+            recommendations.extend(popular_recs)
 
         # Remove duplicates and maintain order
         seen_ids = set()
@@ -645,9 +685,6 @@ def get_recommendations():
                 seen_ids.add(place_id)
                 unique_recommendations.append(place)
 
-        # print("unique_recommendations")
-        # print(unique_recommendations)
-
         # Apply additional filters
         filtered_recommendations = apply_filters(unique_recommendations, args)
 
@@ -656,18 +693,24 @@ def get_recommendations():
         page_count = (total_count + size - 1) // size if total_count > 0 else 1
 
         # Apply pagination
-        paginated_recommendations = filtered_recommendations[offset:offset + size]
+        paginated_recommendations = filtered_recommendations[
+            offset : offset + size
+        ]
 
         # Check if places are in user's favorites
         if paginated_recommendations:
             user_favorites = db.session.execute(
-                db.text("SELECT place_id FROM user_favourites WHERE user_id = :user_id"),
-                {'user_id': user_id}
+                db.text(
+                    'SELECT place_id FROM user_favourites WHERE user_id = :user_id'
+                ),
+                {'user_id': user_id},
             )
             favorite_place_ids = set(row.place_id for row in user_favorites)
-            
+
             for place in paginated_recommendations:
-                place['is_favorite'] = place['element_id'] in favorite_place_ids
+                place['is_favorite'] = (
+                    place['element_id'] in favorite_place_ids
+                )
 
         # Format city data properly
         for place in paginated_recommendations:
@@ -679,14 +722,14 @@ def get_recommendations():
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
                 elif isinstance(city_data, dict):
                     # Already a dict, ensure it has required fields
                     place['city'] = {
                         'created_at': city_data.get('created_at', ''),
                         'name': city_data.get('name', ''),
-                        'postal_code': city_data.get('postal_code', '')
+                        'postal_code': city_data.get('postal_code', ''),
                     }
 
         # Serialize recommendations
@@ -697,22 +740,19 @@ def get_recommendations():
         paging = create_paging(offset, page, page_count, size, total_count)
 
         # Format final response
-        result = {
-            'data': serialized_data,
-            'paging': paging
-        }
-        
+        result = {'data': serialized_data, 'paging': paging}
+
         # Cache for 30 minutes
         try:
             redis = get_redis()
             redis.setex(cache_key, 1800, json.dumps(result))
         except Exception as e:
-            logger.warning(f"Failed to cache recommendations: {str(e)}")
+            logger.warning(f'Failed to cache recommendations: {str(e)}')
 
         return jsonify(result), 200
 
     except Exception as e:
-        logger.error(f"Error getting recommendations: {str(e)}")
+        logger.error(f'Error getting recommendations: {str(e)}')
         return jsonify({'error': 'Failed to get recommendations'}), 500
 
 
@@ -722,22 +762,26 @@ def refresh_user_recommendations():
     """Refresh/invalidate cached recommendations for the current user."""
     try:
         user_id = get_jwt_identity()
-        
+
         # Clear all cached recommendations for this user
         try:
             redis = get_redis()
-            pattern = f"recommendations:{user_id}:*"
+            pattern = f'recommendations:{user_id}:*'
             keys_to_delete = redis.keys(pattern)
             if keys_to_delete:
                 redis.delete(*keys_to_delete)
-                logger.info(f"Cleared {len(keys_to_delete)} cached recommendations for user {user_id}")
+                logger.info(
+                    f'Cleared {len(keys_to_delete)} cached recommendations for user {user_id}'
+                )
         except Exception as e:
-            logger.warning(f"Redis cache error: {str(e)}")
+            logger.warning(f'Redis cache error: {str(e)}')
 
-        return jsonify({'message': 'Recommendations cache refreshed successfully'}), 200
+        return jsonify(
+            {'message': 'Recommendations cache refreshed successfully'}
+        ), 200
 
     except Exception as e:
-        logger.error(f"Error refreshing recommendations: {str(e)}")
+        logger.error(f'Error refreshing recommendations: {str(e)}')
         return jsonify({'error': 'Failed to refresh recommendations'}), 500
 
 
@@ -748,19 +792,24 @@ def get_user_recommendation_stats():
     try:
         user_id = get_jwt_identity()
         user_prefs = get_user_preferences(user_id)
-        print(user_prefs)
         stats = {
             'total_interactions': user_prefs['place_count'],
             'favorite_places_count': len(user_prefs['favorite_places']),
             'reviewed_places_count': len(user_prefs['reviewed_places']),
             'average_rating_given': user_prefs['avg_rating_preference'],
-            'top_subcategories': dict(Counter(user_prefs['subcategories']).most_common(5)),
-            'top_subtypes': dict(Counter(user_prefs['subtypes']).most_common(5)),
-            'recommendation_strategy': 'hybrid' if user_prefs['place_count'] >= 3 else 'popular_based'
+            'top_subcategories': dict(
+                Counter(user_prefs['subcategories']).most_common(5)
+            ),
+            'top_subtypes': dict(
+                Counter(user_prefs['subtypes']).most_common(5)
+            ),
+            'recommendation_strategy': 'hybrid'
+            if user_prefs['place_count'] >= 3
+            else 'popular_based',
         }
-        
+
         return jsonify(stats), 200
 
     except Exception as e:
-        logger.error(f"Error getting recommendation stats: {str(e)}")
-        return jsonify({'error': 'Failed to get recommendation stats'}), 500 
+        logger.error(f'Error getting recommendation stats: {str(e)}')
+        return jsonify({'error': 'Failed to get recommendation stats'}), 500

@@ -136,4 +136,6 @@ def delete_favourite(place_id):
     except SQLAlchemyError as e:
         db.session.rollback()
         logger.error(f'Error removing place from favourites: {str(e)}')
-        return jsonify({'error': 'Failed to remove place from favourites'}), 500
+        return jsonify(
+            {'error': 'Failed to remove place from favourites'}
+        ), 500

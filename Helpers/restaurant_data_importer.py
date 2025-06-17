@@ -280,7 +280,9 @@ def insert_restaurant_via_api(
 
     try:
         logger.info(f'Inserting restaurant: {restaurant_data["name"]}')
-        response = requests.post(api_url, json=restaurant_data, headers=headers)
+        response = requests.post(
+            api_url, json=restaurant_data, headers=headers
+        )
 
         if response.status_code == 201:
             logger.info(

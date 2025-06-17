@@ -1,8 +1,9 @@
-import logging
 import json
+import logging
 import re
 
 logger = logging.getLogger(__name__)
+
 
 def create_paging(
     data: list, page: int, size: int, offset: int, total_count: int
@@ -21,7 +22,9 @@ def create_paging(
     }
 
 
-def create_paging_metadata(offset: int, page: int, page_count: int, size: int, total_count: int):
+def create_paging_metadata(
+    offset: int, page: int, page_count: int, size: int, total_count: int
+):
     """Create only the paging metadata without the data field."""
     return {
         'page': page,
@@ -79,10 +82,12 @@ def get_redis():
     return AppContext().get_redis()
 
 
-def update_place_rating_histogram(place_id: str, old_rating: float = None, new_rating: float = None):
+def update_place_rating_histogram(
+    place_id: str, old_rating: float = None, new_rating: float = None
+):
     """
     Update the rating histogram of a place in Neo4j.
-    
+
     Args:
         place_id: The ID of the place
         old_rating: The old rating to remove (if updating or deleting)
@@ -101,7 +106,7 @@ def update_place_rating_histogram(place_id: str, old_rating: float = None, new_r
                 """
                 MATCH (p)
                 WHERE elementId(p) = $place_id
-                WITH p, 
+                WITH p,
                      CASE WHEN p.rating_histogram IS NULL THEN [0,0,0,0,0] ELSE p.rating_histogram END as hist
                 SET p.rating_histogram = [
                     CASE WHEN $rating = 1 AND hist[0] > 0 THEN hist[0] - 1 ELSE hist[0] END,
@@ -111,16 +116,16 @@ def update_place_rating_histogram(place_id: str, old_rating: float = None, new_r
                     CASE WHEN $rating = 5 AND hist[4] > 0 THEN hist[4] - 1 ELSE hist[4] END
                 ]
                 """,
-                {'place_id': place_id, 'rating': old_rating}
+                {'place_id': place_id, 'rating': old_rating},
             )
-        
+
         # If creating or updating, increment the new rating
         if new_rating is not None:
             execute_neo4j_query(
                 """
                 MATCH (p)
                 WHERE elementId(p) = $place_id
-                WITH p, 
+                WITH p,
                      CASE WHEN p.rating_histogram IS NULL THEN [0,0,0,0,0] ELSE p.rating_histogram END as hist
                 SET p.rating_histogram = [
                     CASE WHEN $rating = 1 THEN hist[0] + 1 ELSE hist[0] END,
@@ -130,54 +135,39 @@ def update_place_rating_histogram(place_id: str, old_rating: float = None, new_r
                     CASE WHEN $rating = 5 THEN hist[4] + 1 ELSE hist[4] END
                 ]
                 """,
-                {'place_id': place_id, 'rating': new_rating}
+                {'place_id': place_id, 'rating': new_rating},
             )
-        
+
         # Update the average rating
         execute_neo4j_query(
             """
             MATCH (p)
             WHERE elementId(p) = $place_id
-            WITH p, 
+            WITH p,
                  CASE WHEN p.rating_histogram IS NULL THEN [0,0,0,0,0] ELSE p.rating_histogram END as hist
-            SET p.rating = CASE 
-                WHEN reduce(total = 0, x IN hist | total + x) > 0 
+            SET p.rating = CASE
+                WHEN reduce(total = 0, x IN hist | total + x) > 0
                 THEN round(toFloat(reduce(total = 0, i IN range(0, 4) | total + (i + 1) * hist[i])) / toFloat(reduce(total = 0, x IN hist | total + x)), 1)
-                ELSE 0.0 
+                ELSE 0.0
             END
             RETURN p.rating, p.rating_histogram
             """,
-            {'place_id': place_id}
+            {'place_id': place_id},
         )
-        # # Log the updated rating and histogram for debugging
-        # result = execute_neo4j_query(
-        #     """
-        #     MATCH (p)
-        #     WHERE elementId(p) = $place_id
-        #     RETURN p.rating, p.rating_histogram
-        #     """,
-        #     {'place_id': place_id}
-        # )
-        # print(result)
-        # print("--------------------------------")
-        # if result:
-        #     logger.info(f"Updated rating for place {place_id}: {result[0]['p.rating']}, histogram: {result[0]['p.rating_histogram']}")
-        # else:
-        #     logger.warning(f"No result found for place {place_id} after updating rating.")
-        
+
         return True
     except Exception as e:
-        logger.error(f"Error updating rating histogram: {str(e)}")
+        logger.error(f'Error updating rating histogram: {str(e)}')
         return False
 
 
 def check_place_exists(place_id: str) -> bool:
     """
     Check if a place exists in Neo4j database.
-    
+
     Args:
         place_id: The ID of the place to check
-        
+
     Returns:
         bool: True if place exists, False otherwise
     """
@@ -188,11 +178,11 @@ def check_place_exists(place_id: str) -> bool:
             WHERE elementId(p) = $place_id
             RETURN count(p) as count
             """,
-            {'place_id': place_id}
+            {'place_id': place_id},
         )
         return result[0]['count'] > 0
     except Exception as e:
-        logger.error(f"Error checking place existence: {str(e)}")
+        logger.error(f'Error checking place existence: {str(e)}')
         return False
 
 
@@ -200,56 +190,68 @@ def update_user_preference_cache(user_id: str):
     """
     Update cached user preferences when user adds favorites or reviews.
     This helps keep recommendations fresh and personalized.
-    
+
     Args:
         user_id: The ID of the user whose preferences need updating
     """
     try:
         redis = get_redis()
-        
+
         # Clear cached recommendations for this user
-        pattern = f"recommendations:{user_id}:*"
+        pattern = f'recommendations:{user_id}:*'
         keys_to_delete = redis.keys(pattern)
         if keys_to_delete:
             redis.delete(*keys_to_delete)
-            logger.info(f"Cleared {len(keys_to_delete)} cached recommendations for user {user_id}")
-        
+            logger.info(
+                f'Cleared {len(keys_to_delete)} cached recommendations for user {user_id}'
+            )
+
         # Optionally pre-compute and cache user preferences
-        from app.models import UserFavourite, UserReview, db
-        
+        from app.models import db
+
         # Get user's favorites and reviews
         favorites_result = db.session.execute(
-            db.text("SELECT place_id FROM user_favourites WHERE user_id = :user_id"),
-            {'user_id': user_id}
+            db.text(
+                'SELECT place_id FROM user_favourites WHERE user_id = :user_id'
+            ),
+            {'user_id': user_id},
         )
         favorite_place_ids = [row.place_id for row in favorites_result]
-        
+
         reviews_result = db.session.execute(
-            db.text("SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id"),
-            {'user_id': user_id}
+            db.text(
+                'SELECT place_id, rating FROM user_reviews WHERE user_id = :user_id'
+            ),
+            {'user_id': user_id},
         )
         reviews = {row.place_id: row.rating for row in reviews_result}
-        
+
         # Cache user interaction summary
         interaction_summary = {
             'favorite_count': len(favorite_place_ids),
             'review_count': len(reviews),
-            'avg_rating': sum(reviews.values()) / len(reviews) if reviews else 0.0,
-            'last_updated': db.session.execute(db.text("SELECT NOW()")).scalar().isoformat()
+            'avg_rating': sum(reviews.values()) / len(reviews)
+            if reviews
+            else 0.0,
+            'last_updated': db.session.execute(db.text('SELECT NOW()'))
+            .scalar()
+            .isoformat(),
         }
-        
-        redis.setex(f"user_summary:{user_id}", 3600, json.dumps(interaction_summary))
-        
+
+        redis.setex(
+            f'user_summary:{user_id}', 3600, json.dumps(interaction_summary)
+        )
+
         return True
     except Exception as e:
-        logger.error(f"Error updating user preference cache: {str(e)}")
+        logger.error(f'Error updating user preference cache: {str(e)}')
         return False
 
 
 def delete_place_and_related_data(place_id: str) -> dict:
     """
     Comprehensively delete a place and all related data from both Neo4j and PostgreSQL.
-    
+
     This function handles:
     - Deleting the place from Neo4j (hotels, restaurants, things-to-do)
     - Removing all relationships (features, price levels, cuisines, etc.)
@@ -257,63 +259,90 @@ def delete_place_and_related_data(place_id: str) -> dict:
     - Removing user favorites from PostgreSQL
     - Removing place from trips in PostgreSQL
     - Clearing all related cache entries
-    
+
     Args:
         place_id: The ID of the place to delete
-        
+
     Returns:
         dict: Summary of deletion operations with counts and status
     """
-    from app.models import UserFavourite, UserReview, UserTrip, db
-    
+    from app.models import UserFavourite, UserReview, db
+
     deletion_summary = {
         'place_deleted': False,
         'reviews_deleted': 0,
         'favorites_deleted': 0,
         'trips_updated': 0,
         'cache_cleared': False,
-        'errors': []
+        'errors': [],
     }
-    
+
     try:
         # Check if place exists first
         if not check_place_exists(place_id):
-            deletion_summary['errors'].append(f"Place with ID {place_id} not found")
+            deletion_summary['errors'].append(
+                f'Place with ID {place_id} not found'
+            )
             return deletion_summary
-        
+
         # 1. Delete user reviews from PostgreSQL
         try:
-            reviews_deleted = db.session.query(UserReview).filter_by(place_id=place_id).delete()
+            reviews_deleted = (
+                db.session.query(UserReview)
+                .filter_by(place_id=place_id)
+                .delete()
+            )
             deletion_summary['reviews_deleted'] = reviews_deleted
-            logger.info(f"Deleted {reviews_deleted} reviews for place {place_id}")
+            logger.info(
+                f'Deleted {reviews_deleted} reviews for place {place_id}'
+            )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error deleting reviews: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error deleting reviews: {str(e)}'
+            )
+
         # 2. Delete user favorites from PostgreSQL
         try:
-            favorites_deleted = db.session.query(UserFavourite).filter_by(place_id=place_id).delete()
+            favorites_deleted = (
+                db.session.query(UserFavourite)
+                .filter_by(place_id=place_id)
+                .delete()
+            )
             deletion_summary['favorites_deleted'] = favorites_deleted
-            logger.info(f"Deleted {favorites_deleted} favorites for place {place_id}")
+            logger.info(
+                f'Deleted {favorites_deleted} favorites for place {place_id}'
+            )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error deleting favorites: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error deleting favorites: {str(e)}'
+            )
+
         # 3. Remove place from trips in PostgreSQL
         try:
             # Get all trips that contain this place using the correct Trip model
             from app.models import Trip
-            trips_deleted = db.session.query(Trip).filter_by(place_id=place_id).delete()
+
+            trips_deleted = (
+                db.session.query(Trip).filter_by(place_id=place_id).delete()
+            )
             deletion_summary['trips_updated'] = trips_deleted
-            logger.info(f"Deleted {trips_deleted} trip entries for place {place_id}")
+            logger.info(
+                f'Deleted {trips_deleted} trip entries for place {place_id}'
+            )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error deleting trip entries: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error deleting trip entries: {str(e)}'
+            )
+
         # Commit PostgreSQL changes
         try:
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            deletion_summary['errors'].append(f"Error committing database changes: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error committing database changes: {str(e)}'
+            )
+
         # 4. Delete place and all relationships from Neo4j
         # IMPORTANT: This only deletes the place node and its relationships.
         # It does NOT delete connected nodes like Subtype, Feature, PriceLevel, etc.
@@ -329,21 +358,27 @@ def delete_place_and_related_data(place_id: str) -> dict:
                 DELETE r, p
                 RETURN count(p) as deleted_count
                 """,
-                {'place_id': place_id}
+                {'place_id': place_id},
             )
-            
+
             if result and result[0]['deleted_count'] > 0:
                 deletion_summary['place_deleted'] = True
-                logger.info(f"Successfully deleted place {place_id} from Neo4j")
+                logger.info(
+                    f'Successfully deleted place {place_id} from Neo4j'
+                )
             else:
-                deletion_summary['errors'].append("Failed to delete place from Neo4j")
+                deletion_summary['errors'].append(
+                    'Failed to delete place from Neo4j'
+                )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error deleting place from Neo4j: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error deleting place from Neo4j: {str(e)}'
+            )
+
         # 5. Clear all related cache entries
         try:
             redis = get_redis()
-            
+
             # Clear cache for all place types
             cache_patterns = [
                 'hotels:*',
@@ -353,53 +388,69 @@ def delete_place_and_related_data(place_id: str) -> dict:
                 f'restaurants:{place_id}',
                 f'things-to-do:{place_id}',
                 'reviews:*',
-                'recommendations:*'
+                'recommendations:*',
             ]
-            
+
             total_keys_deleted = 0
             for pattern in cache_patterns:
                 keys_to_delete = redis.keys(pattern)
                 if keys_to_delete:
                     redis.delete(*keys_to_delete)
                     total_keys_deleted += len(keys_to_delete)
-            
+
             deletion_summary['cache_cleared'] = True
-            logger.info(f"Cleared {total_keys_deleted} cache entries related to place {place_id}")
+            logger.info(
+                f'Cleared {total_keys_deleted} cache entries related to place {place_id}'
+            )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error clearing cache: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error clearing cache: {str(e)}'
+            )
+
         # Update user preference caches for affected users
         try:
             # Get all users who had this place in favorites or reviews
             affected_users = set()
-            
+
             # Users who favorited this place
             favorite_users = db.session.execute(
-                db.text("SELECT DISTINCT user_id FROM user_favourites WHERE place_id = :place_id"),
-                {'place_id': place_id}
+                db.text(
+                    'SELECT DISTINCT user_id FROM user_favourites WHERE place_id = :place_id'
+                ),
+                {'place_id': place_id},
             ).fetchall()
-            affected_users.update([str(user.user_id) for user in favorite_users])
-            
+            affected_users.update(
+                [str(user.user_id) for user in favorite_users]
+            )
+
             # Users who reviewed this place
             review_users = db.session.execute(
-                db.text("SELECT DISTINCT user_id FROM user_reviews WHERE place_id = :place_id"),
-                {'place_id': place_id}
+                db.text(
+                    'SELECT DISTINCT user_id FROM user_reviews WHERE place_id = :place_id'
+                ),
+                {'place_id': place_id},
             ).fetchall()
             affected_users.update([str(user.user_id) for user in review_users])
-            
+
             # Update preference cache for each affected user
             for user_id in affected_users:
                 update_user_preference_cache(user_id)
-            
-            logger.info(f"Updated preference cache for {len(affected_users)} affected users")
+
+            logger.info(
+                f'Updated preference cache for {len(affected_users)} affected users'
+            )
         except Exception as e:
-            deletion_summary['errors'].append(f"Error updating user preference caches: {str(e)}")
-        
+            deletion_summary['errors'].append(
+                f'Error updating user preference caches: {str(e)}'
+            )
+
         return deletion_summary
-        
+
     except Exception as e:
-        deletion_summary['errors'].append(f"Unexpected error during deletion: {str(e)}")
-        logger.error(f"Error in delete_place_and_related_data: {str(e)}")
+        deletion_summary['errors'].append(
+            f'Unexpected error during deletion: {str(e)}'
+        )
+        logger.error(f'Error in delete_place_and_related_data: {str(e)}')
         return deletion_summary
 
 
@@ -411,27 +462,29 @@ def get_all_subtypes():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
-        query = "MATCH (st:Subtype) RETURN DISTINCT st.name AS name ORDER BY name"
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
+        query = (
+            'MATCH (st:Subtype) RETURN DISTINCT st.name AS name ORDER BY name'
+        )
         result = execute_neo4j_query(query)
         data = [item['name'] for item in result]
 
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all subtypes: {str(e)}")
+        logger.error(f'Error fetching all subtypes: {str(e)}')
         return []
 
 
@@ -443,27 +496,27 @@ def get_all_subcategories():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
-        query = "MATCH (sc:Subcategory) RETURN DISTINCT sc.name AS name ORDER BY name"
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
+        query = 'MATCH (sc:Subcategory) RETURN DISTINCT sc.name AS name ORDER BY name'
         result = execute_neo4j_query(query)
         data = [item['name'] for item in result]
 
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all subcategories: {str(e)}")
+        logger.error(f'Error fetching all subcategories: {str(e)}')
         return []
 
 
@@ -475,27 +528,29 @@ def get_all_cuisines():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
-        query = "MATCH (c:Cuisine) RETURN DISTINCT c.name AS name ORDER BY name"
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
+        query = (
+            'MATCH (c:Cuisine) RETURN DISTINCT c.name AS name ORDER BY name'
+        )
         result = execute_neo4j_query(query)
         data = [item['name'] for item in result]
 
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all cuisines: {str(e)}")
+        logger.error(f'Error fetching all cuisines: {str(e)}')
         return []
 
 
@@ -507,27 +562,29 @@ def get_all_meal_types():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
-        query = "MATCH (mt:MealType) RETURN DISTINCT mt.name AS name ORDER BY name"
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
+        query = (
+            'MATCH (mt:MealType) RETURN DISTINCT mt.name AS name ORDER BY name'
+        )
         result = execute_neo4j_query(query)
         data = [item['name'] for item in result]
 
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all meal types: {str(e)}")
+        logger.error(f'Error fetching all meal types: {str(e)}')
         return []
 
 
@@ -539,28 +596,28 @@ def get_all_restaurant_features():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
         # Features can be linked to other place types, so we specify the connection to Restaurant
-        query = "MATCH (:Restaurant)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name"
+        query = 'MATCH (:Restaurant)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name'
         result = execute_neo4j_query(query)
         data = [item['name'] for item in result]
 
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all restaurant features: {str(e)}")
+        logger.error(f'Error fetching all restaurant features: {str(e)}')
         return []
 
 
@@ -572,13 +629,13 @@ def get_all_dietary_restrictions():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
         # Dietary restrictions are stored as a list property, so we need to unwind them
         query = """
         MATCH (r:Restaurant)
@@ -592,13 +649,13 @@ def get_all_dietary_restrictions():
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all dietary restrictions: {str(e)}")
+        logger.error(f'Error fetching all dietary restrictions: {str(e)}')
         return []
 
 
@@ -610,13 +667,13 @@ def get_all_dishes():
         redis = get_redis()
         cached_data = redis.get(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for {cache_key}.")
+            logger.info(f'Cache hit for {cache_key}.')
             return json.loads(cached_data)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for {cache_key}: {e}")
+        logger.warning(f'Redis cache GET failed for {cache_key}: {e}')
 
     try:
-        logger.info(f"Cache miss for {cache_key}. Fetching from Neo4j.")
+        logger.info(f'Cache miss for {cache_key}. Fetching from Neo4j.')
         query = """
         MATCH (r:Restaurant)
         WHERE r.dishes IS NOT NULL AND size(r.dishes) > 0
@@ -629,13 +686,13 @@ def get_all_dishes():
         if redis:
             try:
                 redis.setex(cache_key, 86400, json.dumps(data))  # 24 hours
-                logger.info(f"Successfully cached {cache_key}.")
+                logger.info(f'Successfully cached {cache_key}.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for {cache_key}: {e}")
+                logger.warning(f'Redis cache SET failed for {cache_key}: {e}')
 
         return data
     except Exception as e:
-        logger.error(f"Error fetching all dishes: {str(e)}")
+        logger.error(f'Error fetching all dishes: {str(e)}')
         return []
 
 
@@ -647,14 +704,14 @@ def get_all_hotel_features():
         redis = get_redis()
         cached_features = redis.get(cache_key)
         if cached_features:
-            logger.info("Cache hit for all hotel features.")
+            logger.info('Cache hit for all hotel features.')
             return json.loads(cached_features)
     except Exception as e:
-        logger.warning(f"Redis cache GET failed for hotel features: {e}")
+        logger.warning(f'Redis cache GET failed for hotel features: {e}')
 
     try:
-        logger.info("Cache miss for all hotel features. Fetching from Neo4j.")
-        query = "MATCH (:Hotel)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name"
+        logger.info('Cache miss for all hotel features. Fetching from Neo4j.')
+        query = 'MATCH (:Hotel)-[:HAS_FEATURE]->(f:Feature) RETURN DISTINCT f.name AS name ORDER BY name'
         result = execute_neo4j_query(query)
         features = [item['name'] for item in result]
 
@@ -662,43 +719,46 @@ def get_all_hotel_features():
             try:
                 # Cache for 24 hours
                 redis.setex(cache_key, 86400, json.dumps(features))
-                logger.info("Successfully cached all hotel features.")
+                logger.info('Successfully cached all hotel features.')
             except Exception as e:
-                logger.warning(f"Redis cache SET failed for hotel features: {e}")
+                logger.warning(
+                    f'Redis cache SET failed for hotel features: {e}'
+                )
 
         return features
     except Exception as e:
-        logger.error(f"Error fetching all hotel features from Neo4j: {str(e)}")
+        logger.error(f'Error fetching all hotel features from Neo4j: {str(e)}')
         return []
 
 
 def add_price_fields_to_neo4j_hotels():
     """
-    One-time utility function to extract min_price and max_price from price_range 
+    One-time utility function to extract min_price and max_price from price_range
     strings and add them as properties to Hotel nodes in Neo4j.
-    
+
     This should be run once to migrate existing data.
     """
+
     def extract_price_from_string(price_range_str):
         """Extract min_price and max_price from price_range string."""
         if not price_range_str:
             return None, None
-        
+
         price_str = price_range_str.strip()
-        
+
         # Handle "$101+" format
         if '+' in price_str:
             match = re.search(r'\$(\d+)\+', price_str)
             if match:
                 return int(match.group(1)), None
-        
+
         # Handle "$1 - $25" format
         matches = re.findall(r'\$(\d+)', price_str)
         if len(matches) >= 2:
             return int(matches[0]), int(matches[1])
         elif len(matches) == 1:
             return int(matches[0]), int(matches[0])
-        
+
         return None, None
 
     try:
@@ -709,18 +769,18 @@ def add_price_fields_to_neo4j_hotels():
             WHERE h.price_range IS NOT NULL
             RETURN elementId(h) AS hotel_id, h.price_range AS price_range
             """,
-            {}
+            {},
         )
-        
+
         updated_count = 0
         error_count = 0
-        
+
         for hotel in hotels:
             hotel_id = hotel['hotel_id']
             price_range = hotel['price_range']
-            
+
             min_price, max_price = extract_price_from_string(price_range)
-            
+
             try:
                 # Update hotel with min_price and max_price
                 execute_neo4j_query(
@@ -732,24 +792,13 @@ def add_price_fields_to_neo4j_hotels():
                     {
                         'hotel_id': hotel_id,
                         'min_price': min_price,
-                        'max_price': max_price
-                    }
+                        'max_price': max_price,
+                    },
                 )
                 updated_count += 1
-                print(f"Updated hotel {hotel_id} with min_price: {min_price}, max_price: {max_price}")
-            except Exception as e:
-                print(f"Error updating hotel {hotel_id}: {str(e)}")
+            except Exception:
                 error_count += 1
-        
-        print(f"Price field migration completed. Updated: {updated_count}, Errors: {error_count}")
-        return {'updated': updated_count, 'errors': error_count}
-        
-    except Exception as e:
-        print(f"Error during price field migration: {str(e)}")
-        return {'error': str(e)}
 
-if __name__ == "__main__":
-    subtypes = get_all_subtypes()
-    print(subtypes)
-    subcategories = get_all_subcategories()
-    print(subcategories)
+        return {'updated': updated_count, 'errors': error_count}
+    except Exception as e:
+        return {'error': str(e)}

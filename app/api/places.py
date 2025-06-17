@@ -11,6 +11,7 @@ from app.models import UserFavourite, UserReview, db
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('places', __name__, url_prefix='/places')
 
+
 @blueprint.get('/search')
 def search_place():
     name = request.args.get('name', default='', type=str)
@@ -68,7 +69,9 @@ def search_place():
             """
         )
     else:
-        return {'error': 'Invalid type. Must be one of hotel, restaurant, thingtodo, all.'}, 400
+        return {
+            'error': 'Invalid type. Must be one of hotel, restaurant, thingtodo, all.'
+        }, 400
 
     # Collect results from all queries
     results = []
@@ -77,7 +80,9 @@ def search_place():
         results.extend(res)
 
     # Sort by raw_ranking descending and limit
-    results = sorted(results, key=lambda x: x.get('raw_ranking', 0), reverse=True)[:limit]
+    results = sorted(
+        results, key=lambda x: x.get('raw_ranking', 0), reverse=True
+    )[:limit]
 
     # Format response
     response_data = []
@@ -91,25 +96,31 @@ def search_place():
 
     return {'data': response_data, 'total': len(response_data)}, 200
 
+
 def calculate_similarity_score(place1, place2):
     """Calculate similarity score between two places based on their attributes."""
     score = 0.0
-    
+
     # Compare subcategories (50% weight)
     place1_cats = set(place1.get('subcategories', []))
     place2_cats = set(place2.get('subcategories', []))
     if place1_cats and place2_cats:
-        cat_similarity = len(place1_cats.intersection(place2_cats)) / len(place1_cats.union(place2_cats))
+        cat_similarity = len(place1_cats.intersection(place2_cats)) / len(
+            place1_cats.union(place2_cats)
+        )
         score += cat_similarity * 0.5
-    
+
     # Compare subtypes (50% weight)
     place1_types = set(place1.get('subtypes', []))
     place2_types = set(place2.get('subtypes', []))
     if place1_types and place2_types:
-        type_similarity = len(place1_types.intersection(place2_types)) / len(place1_types.union(place2_types))
+        type_similarity = len(place1_types.intersection(place2_types)) / len(
+            place1_types.union(place2_types)
+        )
         score += type_similarity * 0.5
-    
+
     return score
+
 
 @blueprint.get('/recommendations')
 @jwt_required()
@@ -121,19 +132,19 @@ def get_recommendations():
         # Get user's favorite places and rated places
         favorites = UserFavourite.query.filter_by(user_id=user_id).all()
         user_ratings = UserReview.query.filter_by(user_id=user_id).all()
-        
+
         # Combine favorite and rated place IDs
         user_place_ids = set()
         user_place_ids.update(fav.place_id for fav in favorites)
         user_place_ids.update(rating.place_id for rating in user_ratings)
-        
+
         if not user_place_ids:
             # If no favorites or ratings, return popular things-to-do
             return get_popular_things_to_do()
-        
+
         # Get details of user's places from Neo4j
         user_places = []
-        
+
         # Batch query Neo4j for user's places
         results = execute_neo4j_query(
             """
@@ -143,13 +154,13 @@ def get_recommendations():
             """,
             {'place_ids': list(user_place_ids)},
         )
-        
+
         for result_item in results:
             place_data = result_item['p']
             place_id = result_item['element_id']
             place_data['element_id'] = place_id
             user_places.append(place_data)
-        
+
         # Get all things-to-do places from Neo4j (excluding user's places)
         all_places_results = execute_neo4j_query(
             """
@@ -159,14 +170,14 @@ def get_recommendations():
             """,
             {'user_place_ids': list(user_place_ids)},
         )
-        
+
         # Calculate similarity scores for each place
         recommendations = []
         for result_item in all_places_results:
             place_data = result_item['p']
             place_id = result_item['element_id']
             place_data['element_id'] = place_id
-            
+
             # Calculate average similarity score with user's places
             if not user_places:
                 avg_similarity = 0
@@ -175,17 +186,16 @@ def get_recommendations():
                     calculate_similarity_score(place_data, user_place)
                     for user_place in user_places
                 ]
-                avg_similarity = sum(similarity_scores) / len(similarity_scores)
-            
+                avg_similarity = sum(similarity_scores) / len(
+                    similarity_scores
+                )
+
             # Add rating as a factor (30% weight)
             rating = place_data.get('rating', 0)
             final_score = (avg_similarity * 0.7) + (rating / 5.0 * 0.3)
-            
-            recommendations.append({
-                'place': place_data,
-                'score': final_score
-            })
-        
+
+            recommendations.append({'place': place_data, 'score': final_score})
+
         # Sort by score and return top 10 recommendations
         recommendations.sort(key=lambda x: x['score'], reverse=True)
         top_recommendations = [
@@ -196,19 +206,22 @@ def get_recommendations():
                 'image': rec['place'].get('image', ''),
                 'subcategories': rec['place'].get('subcategories', []),
                 'subtypes': rec['place'].get('subtypes', []),
-                'similarity_score': rec['score']
+                'similarity_score': rec['score'],
             }
             for rec in recommendations[:10]
         ]
-        
-        return jsonify({
-            'recommendations': top_recommendations,
-            'total': len(top_recommendations)
-        }), 200
-        
+
+        return jsonify(
+            {
+                'recommendations': top_recommendations,
+                'total': len(top_recommendations),
+            }
+        ), 200
+
     except Exception as e:
         logger.error(f'Error getting recommendations: {str(e)}')
         return jsonify({'error': 'Failed to get recommendations'}), 500
+
 
 def get_popular_things_to_do():
     """Get popular things-to-do when user has no favorites or ratings."""
@@ -227,26 +240,30 @@ def get_popular_things_to_do():
             RETURN p, elementId(p) AS element_id
             """
         )
-        
+
         popular_places_data = []
         for result_item in results:
             place_data = result_item['p']
             place_id = result_item['element_id']
-            
-            popular_places_data.append({
-                'id': place_id,
-                'name': place_data.get('name', ''),
-                'rating': place_data.get('rating', 0),
-                'image': place_data.get('image', ''),
-                'subcategories': place_data.get('subcategories', []),
-                'subtypes': place_data.get('subtypes', [])
-            })
-        
-        return jsonify({
-            'recommendations': popular_places_data,
-            'total': len(popular_places_data)
-        }), 200
-        
+
+            popular_places_data.append(
+                {
+                    'id': place_id,
+                    'name': place_data.get('name', ''),
+                    'rating': place_data.get('rating', 0),
+                    'image': place_data.get('image', ''),
+                    'subcategories': place_data.get('subcategories', []),
+                    'subtypes': place_data.get('subtypes', []),
+                }
+            )
+
+        return jsonify(
+            {
+                'recommendations': popular_places_data,
+                'total': len(popular_places_data),
+            }
+        ), 200
+
     except Exception as e:
         logger.error(f'Error getting popular things-to-do: {str(e)}')
-        return jsonify({'error': 'Failed to get popular things-to-do'}), 500 
+        return jsonify({'error': 'Failed to get popular things-to-do'}), 500
