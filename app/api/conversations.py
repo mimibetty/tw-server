@@ -205,7 +205,7 @@ tools = types.Tool(
     ]
 )
 config = types.GenerateContentConfig(
-    system_instruction=SYSTEM_INSTRUCTION, tools=[tools], temperature=0.7
+    system_instruction=SYSTEM_INSTRUCTION, tools=[tools], temperature=0.8
 )
 
 
@@ -221,7 +221,7 @@ def create_response():
     contents: list = data['contents']
 
     response = client.models.generate_content(
-        model='gemini-2.0-flash', contents=contents, config=config
+        model='gemini-2.5-pro', contents=contents, config=config
     )
     tool_call = response.candidates[0].content.parts[0].function_call
 
