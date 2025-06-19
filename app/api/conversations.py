@@ -94,6 +94,7 @@ def get_hotel_list():
             elementId(h) AS id,
             h.name AS name
         ORDER BY h.raw_ranking DESC
+        LIMIT 50
         """,
     )
     if not result:
@@ -125,6 +126,7 @@ def get_restaurant_list():
             elementId(r) AS id,
             r.name AS name
         ORDER BY r.raw_ranking DESC
+        LIMIT 50
         """,
     )
     if not result:
@@ -156,6 +158,7 @@ def get_attraction_list():
             elementId(r) AS id,
             r.name AS name
         ORDER BY r.raw_ranking DESC
+        LIMIT 50
         """,
     )
     if not result:
@@ -205,7 +208,7 @@ tools = types.Tool(
     ]
 )
 config = types.GenerateContentConfig(
-    system_instruction=SYSTEM_INSTRUCTION, tools=[tools], temperature=0.8
+    system_instruction=SYSTEM_INSTRUCTION, tools=[tools], temperature=0.7
 )
 
 
