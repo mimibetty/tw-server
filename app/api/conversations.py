@@ -218,18 +218,22 @@ class RequestSchema(ma.Schema):
     )
 
 
+GEMINI_MODEL = 'gemini-2.0-flash'
+
+
 @bp.post('/')
 def create_response():
     data = RequestSchema().load(request.get_json())
     contents: list = data['contents']
 
     response = client.models.generate_content(
-        model='gemini-2.0-flash', contents=contents, config=config
+        model=GEMINI_MODEL, contents=contents, config=config
     )
-    tool_call = response.candidates[0].content.parts[0].function_call
 
     #  Process the function call
-    if tool_call:
+    if response.candidates[0].content.parts[0].function_call:
+        tool_call = response.candidates[0].content.parts[0].function_call
+
         result = None
         if tool_call.name == 'get_hotel_list':
             result = get_hotel_list()
@@ -261,9 +265,7 @@ def create_response():
         contents.append({'role': 'user', 'parts': [function_response_part]})
 
         final_response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            config=config,
-            contents=contents,
+            model=GEMINI_MODEL, config=config, contents=contents
         )
         contents.append(
             {'role': 'model', 'parts': [{'text': final_response.text}]}

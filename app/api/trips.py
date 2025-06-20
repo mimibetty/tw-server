@@ -1,7 +1,6 @@
+import json
 import logging
 import math
-import time
-import json
 import os
 
 from flask import Blueprint, jsonify, request
@@ -12,8 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import ma
 from app.models import Trip, UserTrip, db
-from app.utils import execute_neo4j_query
-from app.utils import get_redis
+from app.utils import execute_neo4j_query, get_redis
 
 LIMIT_TRIP = int(os.environ.get('LIMIT_TRIP', 10))
 logger = logging.getLogger(__name__)

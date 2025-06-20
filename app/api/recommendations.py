@@ -1,15 +1,17 @@
 import json
 import logging
+from collections import Counter, defaultdict
+from typing import Dict, List, Tuple
+
 import numpy as np
-from collections import defaultdict, Counter
-from typing import List, Dict, Optional, Tuple
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from marshmallow import fields, ValidationError, validates
-from app.extensions import ma
-from app.models import UserFavourite, UserReview, VectorItem, db
-from app.utils import execute_neo4j_query, get_redis, create_paging
 from geopy.distance import geodesic
+from marshmallow import ValidationError, fields, validates
+
+from app.extensions import ma
+from app.models import db
+from app.utils import create_paging, execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint(

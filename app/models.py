@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 
 from flask_sqlalchemy import SQLAlchemy
 from pgvector.sqlalchemy import Vector
@@ -7,9 +7,9 @@ from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
+    backref,
     mapped_column,
     relationship,
-    backref,
 )
 from werkzeug.security import generate_password_hash
 
@@ -144,8 +144,10 @@ class VectorItem(BaseModel):
 
     place_id: Mapped[str] = mapped_column(primary_key=True)
     embedding = mapped_column(Vector)
+    category: Mapped[str] = mapped_column(nullable=False)
 
-    def __init__(self, place_id: str, embedding):
+    def __init__(self, place_id: str, embedding, category: str) -> None:
         super().__init__()
         self.place_id = place_id
         self.embedding = embedding
+        self.category = category
