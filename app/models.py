@@ -144,10 +144,10 @@ class VectorItem(BaseModel):
 
     place_id: Mapped[str] = mapped_column(primary_key=True)
     embedding = mapped_column(Vector)
-    category: Mapped[str] = mapped_column(nullable=False)
+    type: Mapped[str] = mapped_column(nullable=False)
 
-    def __init__(self, place_id: str, embedding, category: str) -> None:
+    def __init__(self, place_id: str, embedding, type: str) -> None:
         super().__init__()
         self.place_id = place_id
         self.embedding = embedding
-        self.category = category
+        self.type = type

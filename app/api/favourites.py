@@ -39,7 +39,7 @@ class ShortPlaceSchema(ma.Schema):
 @jwt_required()
 def get_favourites():
     user_id = get_jwt_identity()
-    query = 'SELECT place_id FROM user_favourites WHERE user_id = :user_id'
+    query = 'SELECT place_id FROM user_favourites WHERE user_id = :user_id ORDER BY created_at DESC'
 
     result = db.session.execute(db.text(query), {'user_id': user_id})
     place_ids = [row.place_id for row in result]

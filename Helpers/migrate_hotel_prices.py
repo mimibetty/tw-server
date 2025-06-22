@@ -8,8 +8,8 @@ as separate min_price and max_price properties for more efficient filtering.
 Usage: python migrate_hotel_prices.py
 """
 
-import sys
 import os
+import sys
 
 # Add the app directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
@@ -19,9 +19,7 @@ from app.utils import add_price_fields_to_neo4j_hotels
 
 def main():
     print('Starting hotel price fields migration...')
-    print(
-        'This will add min_price and max_price properties to Hotel nodes in Neo4j.'
-    )
+    print('This will add min_price and max_price properties to Hotel nodes in Neo4j.')
 
     # Confirm before proceeding
     confirm = input('Do you want to proceed? (y/N): ').strip().lower()
@@ -34,7 +32,7 @@ def main():
         if 'error' in result:
             print(f'Migration failed: {result["error"]}')
         else:
-            print(f'Migration completed successfully!')
+            print('Migration completed successfully!')
             print(f'Hotels updated: {result["updated"]}')
             print(f'Errors: {result["errors"]}')
     except Exception as e:

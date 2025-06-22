@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 
 # Add the project root to the Python path to allow for imports from the 'app' module
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -7,7 +7,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 # Now that the path is correctly set, we can import the utility functions
-from app.utils import get_all_subtypes, get_all_subcategories
+from app.utils import get_all_subcategories, get_all_subtypes
 
 
 def main():
