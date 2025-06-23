@@ -9,10 +9,10 @@ from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import (
     create_paging,
+    delete_place_and_related_data,
     execute_neo4j_query,
     get_all_hotel_features,
     get_redis,
-    delete_place_and_related_data,
 )
 
 logger = logging.getLogger(__name__)

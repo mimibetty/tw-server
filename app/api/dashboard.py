@@ -1,10 +1,12 @@
 import logging
-from flask import Blueprint, jsonify, request, Response
+
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
-from marshmallow import fields, ValidationError
+from marshmallow import ValidationError, fields
+
 from app.extensions import ma
 from app.models import db
-from app.utils import execute_neo4j_query, create_paging_metadata
+from app.utils import create_paging_metadata, execute_neo4j_query
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('dashboard', __name__, url_prefix='/dashboard')
@@ -90,10 +92,10 @@ def get_places_statistics():
 
         # Get place statistics from PostgreSQL (count how many times each place appears in trips)
         trip_stats_query = """
-        SELECT 
-            place_id, 
+        SELECT
+            place_id,
             COUNT(*) as trip_count
-        FROM trips 
+        FROM trips
         GROUP BY place_id
         ORDER BY trip_count {order}
         """.format(order='DESC' if order == 'desc' else 'ASC')
@@ -131,9 +133,9 @@ def get_places_statistics():
         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
         RETURN p AS place,
                elementId(p) AS element_id,
-               CASE 
+               CASE
                    WHEN labels(p)[0] = 'Hotel' THEN 'HOTEL'
-                   WHEN labels(p)[0] = 'Restaurant' THEN 'RESTAURANT' 
+                   WHEN labels(p)[0] = 'Restaurant' THEN 'RESTAURANT'
                    WHEN labels(p)[0] = 'ThingToDo' THEN 'THING_TO_DO'
                    ELSE 'UNKNOWN'
                END AS type,
@@ -262,11 +264,11 @@ def get_places_ranking_statistics():
         neo4j_query = f"""
         MATCH (p) WHERE ({type_filter})
         OPTIONAL MATCH (p)-[:LOCATED_IN]->(c:City)
-        WITH p, 
+        WITH p,
              elementId(p) AS element_id,
-             CASE 
+             CASE
                  WHEN labels(p)[0] = 'Hotel' THEN 'HOTEL'
-                 WHEN labels(p)[0] = 'Restaurant' THEN 'RESTAURANT' 
+                 WHEN labels(p)[0] = 'Restaurant' THEN 'RESTAURANT'
                  WHEN labels(p)[0] = 'ThingToDo' THEN 'THING_TO_DO'
                  ELSE 'UNKNOWN'
              END AS type,
@@ -449,18 +451,19 @@ def get_dashboard_summary():
 def get_monthly_user_statistics():
     """Get statistics about the number of users created each month this year."""
     try:
-        from datetime import datetime
         import json
+        from datetime import datetime
+
         from flask import Response
 
         current_year = datetime.now().year
 
         # Query to get user creation statistics by month for current year
         monthly_stats_query = """
-        SELECT 
+        SELECT
             EXTRACT(MONTH FROM created_at) as month_number,
             COUNT(*) as user_count
-        FROM users 
+        FROM users
         WHERE EXTRACT(YEAR FROM created_at) = :current_year
         GROUP BY EXTRACT(MONTH FROM created_at)
         ORDER BY month_number

@@ -1,12 +1,10 @@
-import json
 import logging
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy.exc import SQLAlchemyError
 
+from app.models import UserFavourite, UserReview
 from app.utils import execute_neo4j_query
-from app.models import UserFavourite, UserReview, db
 
 logger = logging.getLogger(__name__)
 blueprint = Blueprint('places', __name__, url_prefix='/places')
@@ -231,9 +229,9 @@ def get_popular_things_to_do():
             """
             MATCH (p:ThingToDo)
             WHERE p.rating >= 4.0
-            WITH p, 
-                 CASE WHEN p.rating_histogram IS NOT NULL 
-                 THEN reduce(total = 0, x IN p.rating_histogram | total + x) 
+            WITH p,
+                 CASE WHEN p.rating_histogram IS NOT NULL
+                 THEN reduce(total = 0, x IN p.rating_histogram | total + x)
                  ELSE 0 END as review_count
             ORDER BY p.rating DESC, review_count DESC
             LIMIT 10

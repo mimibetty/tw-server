@@ -5,80 +5,59 @@ from flask import Blueprint, request
 from google import genai
 from google.genai import types
 from marshmallow import fields, validate
+from sqlalchemy import select
 
 from app.environments import FRONTEND_URL, GEMINI_API_KEY
 from app.extensions import ma
+from app.models import VectorItem, db
 from app.utils import execute_neo4j_query, get_redis
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('conversations', __name__, url_prefix='/conversations')
 
-SYSTEM_INSTRUCTION = """You are TripWise, a knowledgeable and friendly virtual assistant for Da Nang's official tourism platform. Your mission is to help visitors discover the best of Da Nang, Vietnam through personalized recommendations and expert local insights.
+# Constants
+GEMINI_MODEL = 'gemini-2.0-flash'
+EMBEDDING_MODEL = 'text-embedding-004'
+SYSTEM_INSTRUCTION = """You are TripWise Assistant, an AI travel companion for TripWise - a comprehensive travel platform specializing in Da Nang, Vietnam. Your role is to help users discover, plan, and enhance their travel experiences in this beautiful coastal city.
 
-## Core Guidelines
-- Maintain a warm, professional, and enthusiastic tone
-- Provide accurate, helpful information specific to Da Nang
-- Keep responses concise yet informative
-- Always consider user context and preferences when making recommendations
+## Your Capabilities:
+- Provide personalized recommendations for hotels, restaurants, and things to do in Da Nang
+- Access real-time information about top-rated places and attractions
+- Help users find specific places by name using advanced search
+- Offer travel tips, local insights, and cultural information about Da Nang
+- Assist with trip planning, itinerary suggestions, and activity recommendations
 
-## 1. General Tourism Support
-Handle inquiries about:
-- Popular attractions and hidden gems
-- Best times to visit and seasonal activities
-- Local transportation options and getting around
-- Cultural experiences and local customs
-- Weather conditions and what to pack
-- Budget planning and cost considerations
+## Your Personality:
+- Friendly, knowledgeable, and enthusiastic about travel
+- Local expert with deep understanding of Da Nang's culture, cuisine, and attractions
+- Helpful and patient, always ready to provide detailed information
+- Encouraging users to explore and discover new experiences
 
-## 2. Hotel Recommendations
-When users ask about accommodations:
-- Call `get_hotel_list()` to access current hotel data
-- Consider user preferences: budget range, location, amenities, travel style
-- **Formatting for listed hotels**: - [<name>]({url}/hotel/<id>): <description>
-- **Formatting for unlisted hotels**: - <name>: <description>
-- Provide detailed descriptions (minimum 2 sentences) highlighting:
-    - Prime location benefits and nearby attractions
-    - Unique amenities, services, or selling points
-    - Target guest type (business, family, luxury, budget)
+## Guidelines:
+- Always prioritize user safety and provide accurate, up-to-date information
+- Be respectful of local customs and culture when making recommendations
+- Provide specific, actionable advice with relevant details
+- When recommending places, include why they're special and what users can expect
+- Offer alternatives and options to suit different preferences and budgets
+- Use the available tools to provide the most current and relevant recommendations
 
-## 3. Dining Recommendations
-For restaurant and food inquiries:
-- Call `get_restaurant_list()` to access current restaurant data
-- Match recommendations to user interests: cuisine type, dining style, budget, location
-- **Formatting for listed restaurants**: - [<name>]({url}/restaurant/<id>): <description>
-- **Formatting for unlisted restaurants**: - <name>: <description>
-- Craft engaging descriptions (minimum 2 sentences) covering:
-    - Signature dishes and cuisine specialties
-    - Dining atmosphere and experience highlights
-    - Price range and best times to visit
+## Place Recommendations with Specific Conditions:
+When users request places with specific conditions (e.g., "romantic restaurants", "budget hotels", "family-friendly attractions"), follow this process:
+1. Use your knowledge of Da Nang to suggest relevant place names that match their criteria
+2. Use the get_places_by_names function to find the URL details for those places
+3. Format recommendations as clickable links: [Place Name](URL)
+4. If a place isn't found in the database, still mention it but without a link
+5. Provide context about why each place fits their specific requirements
 
-## 4. Attractions & Activities
-For sightseeing and activity requests:
-- Call `get_attraction_list()` to access current attraction data
-- Tailor suggestions based on interests: nature, culture, adventure, family activities
-- **Formatting for listed attractions**: - [<name>]({url}/thing-to-do/<id>): <description>
-- **Formatting for unlisted attractions**: - <name>: <description>
-- Create compelling descriptions (minimum 2 sentences) including:
-    - What makes the attraction unique or must-see
-    - Visitor experience and practical details
-    - Best times to visit and any special considerations
+## Da Nang Context:
+Da Nang is Vietnam's third-largest city, known for its beautiful beaches, rich history, delicious cuisine, and proximity to UNESCO World Heritage sites like Hoi An and My Son. The city offers a perfect blend of modern amenities and traditional Vietnamese culture.
 
-## 5. Off-Topic Queries
-For non-tourism related questions:
-- Politely redirect: "I specialize in Da Nang travel planning! How can I help you explore this beautiful coastal city?"
-- Offer to help with travel-related aspects if there's any connection
-
-## Response Quality Standards
-- Always prioritize user safety and current information
-- Include practical tips when relevant (opening hours, booking advice, etc.)
-- Group related recommendations logically
-- End responses with an invitation for follow-up questions when appropriate
-""".format(url=FRONTEND_URL)
+Remember: Your goal is to make every user's trip to Da Nang memorable and enjoyable by providing personalized, helpful, and accurate travel assistance."""
 
 
 # Function
-def get_hotel_list():
-    cache_key = 'hotel_list:assistant'
+def get_top_places(type: str):
+    cache_key = f'top_list:{type.lower()}:assistant'
     redis = get_redis()
     try:
         cached_result = redis.get(cache_key)
@@ -87,124 +66,119 @@ def get_hotel_list():
     except Exception:
         pass
 
-    result = execute_neo4j_query(
-        """
+    # Define queries based on type
+    if type.lower() == 'hotel':
+        query = """
         MATCH (h:Hotel)
-        RETURN
-            elementId(h) AS id,
-            h.name AS name
-        ORDER BY h.raw_ranking DESC
-        LIMIT 50
-        """,
-    )
-    if not result:
-        return []
-
-    # Cache the result for 6 hours
-    try:
-        redis.setex(cache_key, 21600, json.dumps(result))
-    except Exception:
-        pass
-
-    return result
-
-
-def get_restaurant_list():
-    cache_key = 'restaurant_list:assistant'
-    redis = get_redis()
-    try:
-        cached_result = redis.get(cache_key)
-        if cached_result:
-            return json.loads(cached_result)
-    except Exception:
-        pass
-
-    result = execute_neo4j_query(
+        RETURN elementId(h) AS id, h.name AS name
+        ORDER BY h.raw_ranking DESC LIMIT 5
         """
+    elif type.lower() == 'restaurant':
+        query = """
         MATCH (r:Restaurant)
-        RETURN
-            elementId(r) AS id,
-            r.name AS name
-        ORDER BY r.raw_ranking DESC
-        LIMIT 50
-        """,
-    )
-    if not result:
-        return []
-
-    # Cache the result for 6 hours
-    try:
-        redis.setex(cache_key, 21600, json.dumps(result))
-    except Exception:
-        pass
-
-    return result
-
-
-def get_attraction_list():
-    cache_key = 'attraction_list:assistant'
-    redis = get_redis()
-    try:
-        cached_result = redis.get(cache_key)
-        if cached_result:
-            return json.loads(cached_result)
-    except Exception:
-        pass
-
-    result = execute_neo4j_query(
+        RETURN elementId(r) AS id, r.name AS name
+        ORDER BY r.raw_ranking DESC LIMIT 5
         """
-        MATCH (r:ThingToDo)
-        RETURN
-            elementId(r) AS id,
-            r.name AS name
-        ORDER BY r.raw_ranking DESC
-        LIMIT 50
-        """,
-    )
+    elif type.lower() == 'thing-to-do':
+        query = """
+        MATCH (a:ThingToDo)
+        RETURN elementId(a) AS id, a.name AS name
+        ORDER BY a.raw_ranking DESC LIMIT 5
+        """
+    else:
+        return []
+
+    result = execute_neo4j_query(query)
     if not result:
         return []
 
+    response = []
+    for item in result:
+        response.append(
+            {
+                'name': item['name'],
+                'url': f'{FRONTEND_URL}/{type.lower()}/{item["id"]}',
+            }
+        )
+
     # Cache the result for 6 hours
     try:
-        redis.setex(cache_key, 21600, json.dumps(result))
+        redis.setex(cache_key, 21600, json.dumps(response))
     except Exception:
         pass
+
+    return response
+
+
+def get_places_by_names(names: list[str]):
+    result = []
+    for name in names:
+        embeddings = (
+            client.models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=name,
+                config=types.EmbedContentConfig(task_type='RETRIEVAL_QUERY'),
+            )
+            .embeddings[0]
+            .values
+        )
+
+        # Find the most similar place using cosine similarity
+        query_result = db.session.scalar(
+            select(VectorItem)
+            .filter(VectorItem.embedding.cosine_distance(embeddings) <= 2)
+            .limit(1)
+        )
+        if query_result:
+            result.append(
+                {
+                    'name': name,
+                    'url': f'{FRONTEND_URL}/{query_result.type}/{query_result.place_id}',
+                }
+            )
 
     return result
 
 
 # Define the function declaration for the model
-get_hotel_list_function = {
-    'name': 'get_hotel_list',
-    'description': 'Get a list of hotels in Da Nang, Vietnam',
+get_top_places_function = {
+    'name': 'get_top_places',
+    'description': 'Retrieve the top 5 highest-rated places of a specific category in Da Nang, Vietnam. Returns a list of places with URLs to detailed place information pages and names.',
     'parameters': {
         'type': 'object',
+        'properties': {
+            'type': {
+                'type': 'string',
+                'enum': ['hotel', 'restaurant', 'thing-to-do'],
+                'description': 'Category of places to retrieve: "hotel" for accommodations, "restaurant" for dining establishments, or "thing-to-do" for tourist attractions and activities',
+            },
+        },
+        'required': ['type'],
     },
 }
 
-get_restaurant_list_function = {
-    'name': 'get_restaurant_list',
-    'description': 'Get a list of restaurants in Da Nang, Vietnam',
+get_places_by_names_function = {
+    'name': 'get_places_by_names',
+    'description': 'Find specific places in Da Nang by their names using semantic search. Returns a list of places with URLs to detailed place information pages and names.',
     'parameters': {
         'type': 'object',
+        'properties': {
+            'names': {
+                'type': 'array',
+                'items': {'type': 'string'},
+                'description': 'List of place names to search for',
+            },
+        },
+        'required': ['names'],
     },
 }
 
-get_attraction_list_function = {
-    'name': 'get_attraction_list',
-    'description': 'Get a list of attractions and things to do in Da Nang, Vietnam',
-    'parameters': {
-        'type': 'object',
-    },
-}
-
-# Configure the Gemini
+# Configure the Gemini client and tools
 client = genai.Client(api_key=GEMINI_API_KEY)
 tools = types.Tool(
     function_declarations=[
-        get_hotel_list_function,
-        get_restaurant_list_function,
-        get_attraction_list_function,
+        get_top_places_function,
+        get_places_by_names_function,
     ]
 )
 config = types.GenerateContentConfig(
@@ -218,52 +192,97 @@ class RequestSchema(ma.Schema):
     )
 
 
+@bp.post('/embed')
+def embed_content():
+    result = execute_neo4j_query("""
+    MATCH (p)
+    WHERE p:Hotel OR p:Restaurant OR p:ThingToDo
+    RETURN elementId(p) AS id, p.name AS name, labels(p)[0] AS label
+    ORDER BY p.raw_ranking DESC
+    """)
+
+    if not result:
+        return {'message': 'No places found'}, 404
+
+    # Clear existing embeddings
+    db.session.query(VectorItem).delete()
+    db.session.commit()
+
+    for item in result:
+        embeddings = (
+            client.models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=item['name'],
+                config=types.EmbedContentConfig(
+                    task_type='RETRIEVAL_DOCUMENT'
+                ),
+            )
+            .embeddings[0]
+            .values
+        )
+
+        vector_item = VectorItem(
+            place_id=item['id'],
+            embedding=embeddings,
+            type=item['label'].lower()
+            if item['label'] != 'ThingToDo'
+            else 'thing-to-do',
+        )
+        db.session.add(vector_item)
+        db.session.commit()
+
+    return {'message': 'Embedding completed successfully'}, 200
+
+
 @bp.post('/')
 def create_response():
     data = RequestSchema().load(request.get_json())
     contents: list = data['contents']
 
     response = client.models.generate_content(
-        model='gemini-2.0-flash', contents=contents, config=config
+        model=GEMINI_MODEL, contents=contents, config=config
     )
-    tool_call = response.candidates[0].content.parts[0].function_call
+    # Process the function call
+    if response.candidates[0].content.parts[0].function_call:
+        tool_call = response.candidates[0].content.parts[0].function_call
 
-    #  Process the function call
-    if tool_call:
         result = None
-        if tool_call.name == 'get_hotel_list':
-            result = get_hotel_list()
-        elif tool_call.name == 'get_restaurant_list':
-            result = get_restaurant_list()
-
-        # Create a function response part
-        function_response_part = {
-            'function_response': {
-                'name': tool_call.name,
-                'response': {'result': result},
-            }
-        }
+        if tool_call.name == 'get_top_places':
+            result = get_top_places(**tool_call.args)
+        elif tool_call.name == 'get_places_by_names':
+            result = get_places_by_names(**tool_call.args)
 
         # Append function call and result of the function execution to contents
-        contents.append(
-            {
-                'role': 'model',
-                'parts': [
-                    {
-                        'function_call': {
-                            'name': tool_call.name,
-                            'args': tool_call.args,
+        contents.extend(
+            [
+                {
+                    'role': 'model',
+                    'parts': [
+                        {
+                            'function_call': {
+                                'name': tool_call.name,
+                                'args': tool_call.args,
+                            }
                         }
-                    }
-                ],
-            }
+                    ],
+                },
+                {
+                    'role': 'user',
+                    'parts': [
+                        {
+                            'function_response': {
+                                'name': tool_call.name,
+                                'response': {'result': result},
+                            }
+                        }
+                    ],
+                },
+            ]
         )
-        contents.append({'role': 'user', 'parts': [function_response_part]})
 
+        # Generate final response using the function result
         final_response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            config=config,
-            contents=contents,
+            model=GEMINI_MODEL, config=config, contents=contents
         )
         contents.append(
             {'role': 'model', 'parts': [{'text': final_response.text}]}

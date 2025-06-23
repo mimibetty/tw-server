@@ -56,9 +56,7 @@ def fetch_hotel_data(url: str, limit: int = 100) -> List[Dict[str, Any]]:
         return []
 
 
-def process_hotel_data(
-    hotel: Dict[str, Any], postal_code: str
-) -> Dict[str, Any]:
+def process_hotel_data(hotel: Dict[str, Any], postal_code: str) -> Dict[str, Any]:
     """
     Process raw hotel data into format suitable for API insertion
 
@@ -74,9 +72,7 @@ def process_hotel_data(
         hotel['photos'] = hotel['photos'][:30]
 
     # Process rating histogram - convert from object to list format
-    if 'ratingHistogram' in hotel and isinstance(
-        hotel['ratingHistogram'], dict
-    ):
+    if 'ratingHistogram' in hotel and isinstance(hotel['ratingHistogram'], dict):
         rh = hotel['ratingHistogram']
         hotel['ratingHistogram'] = [
             rh.get('count1', 0),
@@ -277,9 +273,7 @@ def main():
     except (ValueError, TypeError):
         limit = 5  # Default number of hotels to import if env var is invalid
 
-    api_url = (
-        'http://127.0.0.1:8000/api/hotels/'  # URL of the hotels API endpoint
-    )
+    api_url = 'http://127.0.0.1:8000/api/hotels/'  # URL of the hotels API endpoint
 
     # Get JWT token from environment variable
     token = os.getenv('JWT_TOKEN')
@@ -296,9 +290,7 @@ def main():
 
     logger.info('Starting hotel data import process...')
     logger.info(f'Target city postal code: {postal_code}')
-    logger.info(
-        f'Importing up to {limit} hotels (set via IMPORT_LIMIT env var)'
-    )
+    logger.info(f'Importing up to {limit} hotels (set via IMPORT_LIMIT env var)')
 
     result = bulk_insert_hotels(
         postal_code=postal_code,
@@ -309,22 +301,16 @@ def main():
     )
 
     if result['success']:
-        logger.info(
-            f'Successfully imported {result["data"]["inserted"]} hotels'
-        )
+        logger.info(f'Successfully imported {result["data"]["inserted"]} hotels')
         if result['data']['errors']:
             logger.info(f'Errors: {len(result["data"]["errors"])}')
             for i, error in enumerate(result['data']['errors'][:5]):
                 logger.error(f'Error {i + 1}: {error}')
 
             if len(result['data']['errors']) > 5:
-                logger.info(
-                    f'... and {len(result["data"]["errors"]) - 5} more errors'
-                )
+                logger.info(f'... and {len(result["data"]["errors"]) - 5} more errors')
     else:
-        logger.error(
-            f'Import process failed: {result.get("error", "Unknown error")}'
-        )
+        logger.error(f'Import process failed: {result.get("error", "Unknown error")}')
 
     logger.info('Hotel data import process completed!')
 

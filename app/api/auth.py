@@ -10,11 +10,11 @@ from flask_jwt_extended import (
     jwt_required,
 )
 from marshmallow import ValidationError, fields, validates
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from werkzeug.security import check_password_hash
 
 from app.extensions import ma
-from app.models import User, db, UserFavourite, UserReview, UserTrip
+from app.models import User, UserFavourite, UserReview, UserTrip, db
 from app.utils import get_redis
 
 logger = logging.getLogger(__name__)

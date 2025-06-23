@@ -1,11 +1,11 @@
 import logging
-from datetime import datetime, date
+from datetime import date
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from marshmallow import fields, ValidationError, validates, validate
-from sqlalchemy import func, or_, and_
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from werkzeug.security import check_password_hash
+from marshmallow import ValidationError, fields, validate, validates
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.extensions import ma
 from app.models import User, db

@@ -1,5 +1,6 @@
-import time
 import math
+import time
+
 from geopy.distance import geodesic, great_circle
 
 

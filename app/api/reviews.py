@@ -1,18 +1,19 @@
-import logging
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from sqlalchemy.orm import joinedload
 import json
+import logging
 import time
 
-from app.models import UserReview, User, db
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import joinedload
+
+from app.models import User, UserReview, db
 from app.utils import (
-    update_place_rating_histogram,
     check_place_exists,
-    get_redis,
-    update_user_preference_cache,
     create_paging,
+    get_redis,
+    update_place_rating_histogram,
+    update_user_preference_cache,
 )
 
 logger = logging.getLogger(__name__)

@@ -9,6 +9,7 @@ from app.extensions import ma
 from app.models import UserFavourite, db
 from app.utils import (
     create_paging,
+    delete_place_and_related_data,
     execute_neo4j_query,
     get_all_cuisines,
     get_all_dietary_restrictions,
@@ -16,7 +17,6 @@ from app.utils import (
     get_all_meal_types,
     get_all_restaurant_features,
     get_redis,
-    delete_place_and_related_data,
 )
 
 logger = logging.getLogger(__name__)
