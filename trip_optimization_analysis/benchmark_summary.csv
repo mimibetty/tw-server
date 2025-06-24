@@ -1,0 +1,37 @@
+n_places,algorithm,avg_execution_time_s,avg_total_distance_m,num_timeouts,timeout_rate,,,n_places,algorithm,avg_execution_time_s,avg_total_distance_m,num_timeouts,timeout_rate
+5,Dynamic Programming,2.1021,48071.4,0,0,,,16,Dynamic Programming,3.9202,98877.8,0,0
+5,Google OR-Tools,0.0029,53678.8,0,0,,,16,Google OR-Tools,0.0041,106392,0,0
+8,Dynamic Programming,2.0972,64468,0,0,,,17,Dynamic Programming,6.2869,101161.4,0,0
+8,Google OR-Tools,0.0018,68449.4,0,0,,,17,Google OR-Tools,0.0044,108877.8,0,0
+9,Dynamic Programming,2.212,68838.4,0,0,,,18,Dynamic Programming,10,inf,5,1
+9,Google OR-Tools,0.002,74682.2,0,0,,,18,Google OR-Tools,0.0058,112679.2,0,0
+10,Dynamic Programming,2.1385,71049.6,0,0,,,20,Dynamic Programming,10,inf,5,1
+10,Google OR-Tools,0.0022,74383.4,0,0,,,20,Google OR-Tools,0.0066,113175.4,0,0
+11,Dynamic Programming,2.1732,83637.2,0,0,,,25,Dynamic Programming,10,inf,5,1
+11,Google OR-Tools,0.003,90792.6,0,0,,,25,Google OR-Tools,0.0079,133646.4,0,0
+12,Dynamic Programming,2.1615,92641,0,0,,,30,Dynamic Programming,10,inf,5,1
+12,Google OR-Tools,0.0029,97577.6,0,0,,,30,Google OR-Tools,0.0118,152640.8,0,0
+13,Dynamic Programming,2.4102,88725,0,0,,,40,Dynamic Programming,10,inf,5,1
+13,Google OR-Tools,0.0034,97064.8,0,0,,,40,Google OR-Tools,0.0219,169362.2,0,0
+14,Dynamic Programming,2.5239,92691.6,0,0,,,50,Dynamic Programming,10,inf,5,1
+14,Google OR-Tools,0.0035,98408.4,0,0,,,50,Google OR-Tools,0.0451,192366.2,0,0
+15,Dynamic Programming,3.0061,99524,0,0,,,60,Dynamic Programming,10,inf,5,1
+15,Google OR-Tools,0.0037,103244,0,0,,,60,Google OR-Tools,0.0728,206187.4,0,0
+16,Dynamic Programming,3.9202,98877.8,0,0,,,,,,,,
+16,Google OR-Tools,0.0041,106392,0,0,,,,,,,,
+17,Dynamic Programming,6.2869,101161.4,0,0,,,,,,,,
+17,Google OR-Tools,0.0044,108877.8,0,0,,,,,,,,
+18,Dynamic Programming,10,inf,5,1,,,,,,,,
+18,Google OR-Tools,0.0058,112679.2,0,0,,,,,,,,
+20,Dynamic Programming,10,inf,5,1,,,,,,,,
+20,Google OR-Tools,0.0066,113175.4,0,0,,,,,,,,
+25,Dynamic Programming,10,inf,5,1,,,,,,,,
+25,Google OR-Tools,0.0079,133646.4,0,0,,,,,,,,
+30,Dynamic Programming,10,inf,5,1,,,,,,,,
+30,Google OR-Tools,0.0118,152640.8,0,0,,,,,,,,
+40,Dynamic Programming,10,inf,5,1,,,,,,,,
+40,Google OR-Tools,0.0219,169362.2,0,0,,,,,,,,
+50,Dynamic Programming,10,inf,5,1,,,,,,,,
+50,Google OR-Tools,0.0451,192366.2,0,0,,,,,,,,
+60,Dynamic Programming,10,inf,5,1,,,,,,,,
+60,Google OR-Tools,0.0728,206187.4,0,0,,,,,,,,
