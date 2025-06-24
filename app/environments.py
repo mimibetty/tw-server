@@ -12,6 +12,7 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')
 # Load environment variables from .env file
 load_dotenv()
 
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.5-pro')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 

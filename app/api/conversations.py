@@ -7,7 +7,7 @@ from google.genai import types
 from marshmallow import fields, validate
 from sqlalchemy import select
 
-from app.environments import FRONTEND_URL, GEMINI_API_KEY
+from app.environments import FRONTEND_URL, GEMINI_API_KEY, GEMINI_MODEL
 from app.extensions import ma
 from app.models import VectorItem, db
 from app.utils import execute_neo4j_query, get_redis
@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('conversations', __name__, url_prefix='/conversations')
 
 # Constants
-GEMINI_MODEL = 'gemini-2.0-flash'
 EMBEDDING_MODEL = 'text-embedding-004'
 SYSTEM_INSTRUCTION = """You are TripWise Assistant, an AI travel companion for TripWise - a comprehensive travel platform specializing in Da Nang, Vietnam. Your role is to help users discover, plan, and enhance their travel experiences in this beautiful coastal city.
 
@@ -213,9 +212,7 @@ def embed_content():
             client.models.embed_content(
                 model=EMBEDDING_MODEL,
                 contents=item['name'],
-                config=types.EmbedContentConfig(
-                    task_type='RETRIEVAL_DOCUMENT'
-                ),
+                config=types.EmbedContentConfig(task_type='RETRIEVAL_DOCUMENT'),
             )
             .embeddings[0]
             .values
@@ -284,9 +281,7 @@ def create_response():
         final_response = client.models.generate_content(
             model=GEMINI_MODEL, config=config, contents=contents
         )
-        contents.append(
-            {'role': 'model', 'parts': [{'text': final_response.text}]}
-        )
+        contents.append({'role': 'model', 'parts': [{'text': final_response.text}]})
     else:
         contents.append({'role': 'model', 'parts': [{'text': response.text}]})
 
