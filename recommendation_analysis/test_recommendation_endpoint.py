@@ -9,7 +9,7 @@ API_BASE_URL = os.environ.get('API_BASE_URL', 'http://127.0.0.1:8000/api')
 # ** IMPORTANT **
 # You must replace this with a valid JWT token for a test user.
 # You can obtain this by logging in with a user account.
-USER_TOKEN = os.environ.get('USER_TOKEN', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc1MDczMzE0NiwianRpIjoiYmJkZWZiMTYtYTE3MS00YzM5LTk0NDItMjRjOTcyMjBlNjVjIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjRlOGE4Zjg3LTgwMjItNDJmMC1iNDQ2LThkMmIyMDRkZDNjZCIsIm5iZiI6MTc1MDczMzE0NiwiY3NyZiI6ImExODE0MDE0LTA4ZGMtNDcwNy05YWI1LWE5N2EyYjc1YTUwMCIsImV4cCI6MTc1MDgxOTU0Nn0.iY9sq3OSSIVD4g0qSp8IYHB2tpL9jLGEQq7G_mJfzr4')
+USER_TOKEN = os.environ.get('USER_TOKEN', 'Key')
 
 # --- Test Parameters ---
 # Modify these parameters to test different scenarios
