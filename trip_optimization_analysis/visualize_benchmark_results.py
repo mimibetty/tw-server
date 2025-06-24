@@ -106,8 +106,8 @@ def plot_quality_difference(df):
     ax.set_title('OR-Tools vs. Optimal (DP) Solution Quality', fontsize=16, fontweight='bold')
     ax.set_xlabel('Number of Places (n)', fontsize=12)
     ax.set_ylabel('Distance Difference (%)', fontsize=12)
-    ax.text(0.01, 0.05, 'Negative values mean OR-Tools found a better or equal path',
-            transform=ax.transAxes, fontsize=10, style='italic')
+    # ax.text(0.01, 0.05, 'Negative values mean OR-Tools found a better or equal path',
+    #         transform=ax.transAxes, fontsize=10, style='italic')
 
     plt.tight_layout()
     output_path = os.path.join(OUTPUT_DIR, '3_or_tools_optimality_gap.png')
